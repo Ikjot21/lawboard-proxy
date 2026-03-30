@@ -93,6 +93,7 @@ function parseHTML(html, cnr) {
   result.judgeName    = result.courtNo;
 
   // ── Petitioner / Respondent — parse from HTML table rows ──
+  const bodyText = $.text();
   // eCourts uses td elements with numbered lists
   const petitioners = [];
   const respondents = [];
