@@ -42,10 +42,13 @@ module.exports = async (req, res) => {
       }
     );
 
-    const html = typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data);
+    const raw = resp.data;
+    const html = raw.casetype_list || raw.case_details_html ||
+                 (typeof raw === 'string' ? raw : JSON.stringify(raw));
+
     console.log('Status:', resp.status);
     console.log('Response length:', html.length);
-    console.log('Response preview:', html.substring(0, 500));
+    console.log('Response preview:', html.substring(0, 300));
 
     // Check for CAPTCHA error
     if (html.toLowerCase().includes('invalid captcha') ||
@@ -72,42 +75,47 @@ function parseHTML(html, cnr) {
   const $ = cheerio.load(html);
   const result = { cnr: cnr.toUpperCase() };
 
-  // Party name / case title
-  result.partyName =
-    $('h4').first().text().trim() ||
-    $('.case_title').text().trim() ||
-    findAfterLabel($, 'Case Title') || '';
+  // Court name — h2 tag
+  result.courtName = $('h2').first().text().trim() || '';
 
-  // Court name
-  result.courtName =
-    $('h3').first().text().trim() ||
-    $('.court_name').text().trim() || '';
-
-  // Next hearing date
-  result.nextDate =
-    findAfterLabel($, 'Next Date') ||
-    findAfterLabel($, 'Next Hearing') ||
-    $('td:contains("Next")').next().text().trim() || '';
-
-  // First hearing date
-  result.firstDate = findAfterLabel($, 'First Hearing') || '';
-
-  // Case stage
-  result.caseStage = findAfterLabel($, 'Case Stage') ||
-                     findAfterLabel($, 'Stage') || '';
+  // Case type
+  result.caseType = findAfterTh($, 'Case Type') || '';
 
   // Filing info
-  result.filingNumber = findAfterLabel($, 'Filing Number') || '';
-  result.filingDate   = findAfterLabel($, 'Filing Date') || '';
-  result.regNumber    = findAfterLabel($, 'Registration Number') || '';
-  result.regDate      = findAfterLabel($, 'Registration Date') || '';
-  result.caseType     = findAfterLabel($, 'Case Type') || '';
+  result.filingNumber = findAfterTh($, 'Filing Number') || '';
+  result.filingDate   = findAfterTh($, 'Filing Date')   || '';
+  result.regNumber    = findAfterTh($, 'Registration Number') || '';
+  result.regDate      = findAfterTh($, 'Registration Date')   || '';
+  result.cnrNumber    = findAfterTh($, 'CNR Number') || cnr.toUpperCase();
 
-  // Petitioner / Respondent
-  result.petitioner   = $('[class*="petitioner"]').first().text().trim() ||
-                        findAfterLabel($, 'Petitioner') || '';
-  result.respondent   = $('[class*="respondent"]').first().text().trim() ||
-                        findAfterLabel($, 'Respondent') || '';
+  // Case status
+  result.firstDate  = findAfterTh($, 'First Hearing Date') || '';
+  result.nextDate   = findAfterTh($, 'Next Hearing Date')  || '';
+  result.caseStage  = findAfterTh($, 'Case Stage') || findAfterTh($, 'Stage') || '';
+  result.courtNo    = findAfterTh($, 'Court Number') || findAfterTh($, 'Court No') || '';
+  result.judgeName  = findAfterTh($, 'Judge') || findAfterTh($, 'Coram') || '';
+
+  // Petitioner / Respondent — look in tables
+  $('table').each((_, tbl) => {
+    const tblHtml = $(tbl).html() || '';
+    if (tblHtml.toLowerCase().includes('petitioner')) {
+      $(tbl).find('tr').each((_, row) => {
+        const th = $(row).find('th').text().trim().toLowerCase();
+        const td = $(row).find('td').first().text().trim();
+        if (th.includes('petitioner') && td) result.petitioner = td;
+        if (th.includes('respondent') && td) result.respondent = td;
+        if (th.includes('advocate') && th.includes('petitioner') && td) result.petAdvocate = td;
+        if (th.includes('advocate') && th.includes('respondent') && td) result.respAdvocate = td;
+      });
+    }
+  });
+
+  // Party name = petitioner vs respondent
+  if (result.petitioner && result.respondent) {
+    result.partyName = `${result.petitioner} vs ${result.respondent}`;
+  } else {
+    result.partyName = $('h3').first().text().trim() || '';
+  }
 
   // Hearing history
   const history = [];
@@ -116,21 +124,27 @@ function parseHTML(html, cnr) {
     if (cells.length >= 2) {
       const date    = $(cells[0]).text().trim();
       const purpose = $(cells[1]).text().trim();
-      if (date.match(/\d{2}-\d{2}-\d{4}|\d{2}(st|nd|rd|th)\s+\w+\s+\d{4}/i) && purpose) {
+      if (date.match(/\d{2}-\d{2}-\d{4}/) && purpose && purpose.length < 100) {
         history.push(`${date} — ${purpose}`);
       }
     }
   });
   result.hearingHistory = history;
 
+  console.log('Parsed:', JSON.stringify(result).substring(0, 400));
   return result;
 }
 
-function findAfterLabel($, label) {
+function findAfterTh($, label) {
   let val = '';
-  $('td').each((_, el) => {
+  $('th').each((_, el) => {
     if ($(el).text().trim().toLowerCase().includes(label.toLowerCase())) {
+      // Try next td sibling
       val = $(el).next('td').text().trim();
+      if (!val) {
+        // Try parent row's td
+        val = $(el).closest('tr').find('td').first().text().trim();
+      }
       if (val) return false;
     }
   });
