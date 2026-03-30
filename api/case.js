@@ -92,69 +92,44 @@ function parseHTML(html, cnr) {
   result.courtNo      = findTh('Court Number') || findTh('Court Number and Judge') || '';
   result.judgeName    = result.courtNo;
 
-  // ── Petitioner / Respondent — parse from HTML table rows ──
+  // ── Petitioner / Respondent from body text ──
   const bodyText = $.text();
-  // eCourts uses td elements with numbered lists
-  const petitioners = [];
-  const respondents = [];
-  let inPet = false, inResp = false;
 
-  $('td, th').each((_, el) => {
-    const txt = $(el).text().trim();
-    if (/Petitioner and Advocate/i.test(txt)) { inPet = true; inResp = false; return; }
-    if (/Respondent and Advocate/i.test(txt)) { inPet = false; inResp = true; return; }
-    if (/^(Acts|Processes|FIR Details|Case History|Under Act)/i.test(txt)) { inPet = false; inResp = false; return; }
-
-    if (inPet || inResp) {
-      // Extract numbered entries like "1) NAME"
-      const matches = txt.match(/\d+\)\s*([^\n]+)/g) || [];
-      matches.forEach(m => {
-        let name = m.replace(/^\d+\)\s*/, '')
-          .replace(/\s*Advocate[-–:].*/i, '')
-          .replace(/[,\s]*[\d]+\([\d\w]+\).*/g, '')
-          .trim();
-        if (name && name.length > 1 && name.length < 80 && /[A-Z]/.test(name)) {
-          if (inPet) petitioners.push(name);
-          else respondents.push(name);
-        }
-      });
-      // Also extract advocate
-      const advMatch = txt.match(/Advocate[-–:]\s*([A-Z][A-Z\s]+?)(?:\n|$|\d\))/i);
-      if (advMatch) {
-        if (inPet && !result.petAdvocate) result.petAdvocate = advMatch[1].trim();
-        if (inResp && !result.respAdvocate) result.respAdvocate = advMatch[1].trim();
-      }
-    }
-  });
-
-  // Fallback to body text if HTML parsing got nothing
-  if (petitioners.length === 0) {
-    const petBlock = bodyText.match(/Petitioner and Advocate([\s\S]*?)(?=Respondent and Advocate)/i);
-    if (petBlock) {
-      const nameM = petBlock[1].match(/1\)\s*([^\n]+)/);
-      if (nameM) petitioners.push(nameM[1].replace(/\s*Advocate[-–:].*/i,'').trim());
-      const advM = petBlock[1].match(/Advocate[-–:]\s*([A-Z][A-Z\s]+)/i);
-      if (advM && !result.petAdvocate) result.petAdvocate = advM[1].trim();
-    }
-  }
-  if (respondents.length === 0) {
-    const respBlock = bodyText.match(/Respondent and Advocate([\s\S]{0,400})(?=Acts\b|Processes\b|FIR Details|Case History|Under Act)/i);
-    if (respBlock) {
-      const regex = /\d+\)\s*([^\n]+)/g;
-      let m;
-      while ((m = regex.exec(respBlock[1])) !== null) {
-        let name = m[1].replace(/\s*Advocate[-–:].*/i,'')
-          .replace(/[,\s]*[\d]+\([\d\w]+\).*/g,'').trim();
-        if (name && name.length > 1 && name.length < 60 && /[A-Z]/.test(name)) respondents.push(name);
-      }
-      const advM = respBlock[1].match(/Advocate[-–:]\s*([A-Z][A-Z\s]+)/i);
-      if (advM && !result.respAdvocate) result.respAdvocate = advM[1].trim();
-    }
+  // Petitioner
+  const petBlock = bodyText.match(/Petitioner and Advocate([\s\S]*?)(?=Respondent and Advocate)/i);
+  if (petBlock) {
+    const txt = petBlock[1];
+    const nameM = txt.match(/1\)\s*([^\n]+)/);
+    const advM  = txt.match(/Advocate[-–:]\s*([A-Z][A-Z\s]+)/i);
+    if (nameM) result.petitioner  = nameM[1].replace(/\s*Advocate[-–:][\s\S]*/i, '').trim();
+    if (advM)  result.petAdvocate = advM[1].trim();
   }
 
-  result.petitioner  = petitioners.join(', ');
-  result.respondent  = respondents.join(', ');
-  result.partyName   = (result.petitioner && result.respondent)
+  // Respondent — handle multiple
+  const respBlock = bodyText.match(/Respondent and Advocate([\s\S]{0,600})(?=\s*Acts\b|\s*Processes\b|\s*FIR Details|\s*Case History|\s*Under Act)/i);
+  if (respBlock) {
+    const txt = respBlock[1];
+    const names = [];
+    // Split by numbered entries: "1) NAME\n   Advocate-..."  "2) NAME..."
+    const entries = txt.split(/(?=\d+\))/);
+    entries.forEach(entry => {
+      const nameM = entry.match(/^\d+\)\s*([^\n]+)/);
+      if (!nameM) return;
+      let name = nameM[1]
+        .replace(/\s*Advocate[-–\s]*[-:].*/i, '')
+        .trim();
+      // Remove any section number garbage at end
+      name = name.replace(/[,\s]*[A-Z]{1,3}[\d,\(\)]+.*/g, '').trim();
+      if (name && name.length > 1 && name.length < 70 && /[A-Z]/.test(name)) {
+        names.push(name);
+      }
+    });
+    result.respondent = names.join(', ');
+    const advM = txt.match(/Advocate[-–:]\s*([A-Z][A-Z\s]+)/i);
+    if (advM) result.respAdvocate = advM[1].trim();
+  }
+
+  result.partyName = (result.petitioner && result.respondent)
     ? `${result.petitioner} vs ${result.respondent}` : '';
 
   // ── Case History ──
