@@ -198,9 +198,12 @@ function parseHTML(html, cnr, raw) {
 
   // ── Interim Orders ──
   const orders = [];
+  let orderTableFound = false;
   $('table').each((_, tbl) => {
     const tblText = $(tbl).text().toLowerCase();
-    if (tblText.includes('order number') || tblText.includes('order date') || tblText.includes('interim order')) {
+    if (tblText.includes('order number') || tblText.includes('order date') ||
+        tblText.includes('interim order') || tblText.includes('copy of order')) {
+      orderTableFound = true;
       $(tbl).find('tr').each((_, row) => {
         const cells = $(row).find('td');
         if (cells.length >= 2) {
@@ -213,6 +216,16 @@ function parseHTML(html, cnr, raw) {
       });
     }
   });
+  console.log('Order table found:', orderTableFound, 'Orders count:', orders.length);
+  // Also check body text for orders
+  const orderMatches = bodyText.match(/(\d+)\s+(\d{2}-\d{2}-\d{4})\s+Copy of order/gi) || [];
+  console.log('Order matches in text:', orderMatches.length);
+  if (orders.length === 0 && orderMatches.length > 0) {
+    orderMatches.forEach(m => {
+      const parts = m.match(/(\d+)\s+(\d{2}-\d{2}-\d{4})/);
+      if (parts) orders.push(`Order ${parts[1]} — ${parts[2]}`);
+    });
+  }
   result.orders = orders;
 
   return result;
