@@ -116,10 +116,13 @@ function parseHTML(html, cnr) {
       const nameM = entry.match(/^\d+\)\s*([^\n]+)/);
       if (!nameM) return;
       let name = nameM[1]
-        .replace(/\s*Advocate[-–\s]*[-:].*/i, '')
+        .replace(/\s*Advocate[-–\s]*[-:].*/i, '')   // cut at Advocate
+        .replace(/\s*Acts\b.*/i, '')                  // cut at Acts
+        .replace(/\s*Under Act.*/i, '')               // cut at Under Act
+        .replace(/\s*Processes\b.*/i, '')             // cut at Processes
+        .replace(/[,\s]*\d{3}[A-Z]*\w*Protection.*/,'') // cut at section+Protection
+        .replace(/[,\s]*\d{3}[A-Z]*[\d()]+.*/g, '') // cut at IPC section numbers
         .trim();
-      // Remove any section number garbage at end
-      name = name.replace(/[,\s]*[A-Z]{1,3}[\d,\(\)]+.*/g, '').trim();
       if (name && name.length > 1 && name.length < 70 && /[A-Z]/.test(name)) {
         names.push(name);
       }
