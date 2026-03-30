@@ -131,7 +131,13 @@ function parseHTML(html, cnr) {
   });
   result.hearingHistory = history;
 
-  console.log('Parsed:', JSON.stringify(result).substring(0, 400));
+  console.log('Parsed courtName:', result.courtName);
+  console.log('Parsed nextDate:', result.nextDate);
+  console.log('Parsed petitioner:', result.petitioner);
+  console.log('Parsed respondent:', result.respondent);
+  console.log('Parsed historyCount:', result.hearingHistory?.length);
+  console.log('Parsed history[0]:', result.hearingHistory?.[0]);
+  console.log('Full result:', JSON.stringify(result));
   return result;
 }
 
