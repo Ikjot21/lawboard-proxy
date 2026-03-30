@@ -7,12 +7,10 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  const { cnr, captchaCode, cookieStr, sessionId } = req.body || {};
+  const { cnr, captchaCode, cookieStr } = req.body || {};
   if (!cnr || !captchaCode) {
     return res.status(400).json({ success: false, error: 'cnr and captchaCode required' });
   }
-
-  const cookie = cookieStr || (sessionId ? `SERVICES_SESSID=${sessionId}` : '');
 
   try {
     const params = new URLSearchParams({
@@ -32,142 +30,118 @@ module.exports = async (req, res) => {
           'X-Requested-With': 'XMLHttpRequest',
           'Referer':          `${ECOURTS_BASE}/`,
           'Origin':            ECOURTS_BASE,
-          'Cookie':            cookie,
+          'Cookie':            cookieStr || '',
         },
         timeout: 15000,
       }
     );
 
-    const raw = resp.data;
-    // eCourts returns JSON with casetype_list field containing HTML
-    const html = raw.casetype_list || raw.case_details_html ||
-                 (typeof raw === 'string' ? raw : JSON.stringify(raw));
+    const raw  = resp.data;
+    const html = raw.casetype_list || (typeof raw === 'string' ? raw : '');
 
-    console.log('Response type:', typeof raw);
-    console.log('HTML length:', html.length);
-    console.log('HTML preview:', html.substring(0, 200));
-
-    if (html.toLowerCase().includes('invalid captcha') || html.toLowerCase().includes('wrong captcha')) {
+    if (!html || html.toLowerCase().includes('invalid captcha')) {
       return res.status(200).json({ success: false, error: 'CAPTCHA galat hai — dobara try karo' });
     }
     if (html.toLowerCase().includes('no record') || html.toLowerCase().includes('not found')) {
       return res.status(200).json({ success: false, error: 'Case nahi mila. CNR check karo.' });
     }
 
-    // Now fetch FULL case page — casetype_list only has partial data
-    // We need to also fetch case history separately
-    const fullData = parseHTML(html, cnr, raw);
+    const result = parseHTML(html, cnr);
+    console.log('petitioner:', result.petitioner);
+    console.log('respondent:', result.respondent);
+    console.log('history:', result.hearingHistory.length);
+    console.log('orders:', result.orders.length);
 
-    // If history empty, try fetching from raw.history_case_hearing
-    if (fullData.hearingHistory.length === 0 && raw.history_case_hearing) {
-      console.log('Using raw.history_case_hearing');
-      const histHtml = raw.history_case_hearing;
-      const $h = cheerio.load(histHtml);
-      const history = [];
-      $h('tr').each((_, row) => {
-        const cells = $h(row).find('td');
-        if (cells.length >= 3) {
-          const date    = $h(cells[2]).text().trim();
-          const purpose = $h(cells[3] || cells[2]).text().trim();
-          if (date.match(/\d{2}-\d{2}-\d{4}/)) {
-            history.push(`${date} — ${purpose}`);
-          }
-        }
-      });
-      fullData.hearingHistory = history;
-    }
-
-    // Petitioner from raw
-    if (!fullData.petitioner && raw.petitioner_advocate_html) {
-      const $p = cheerio.load(raw.petitioner_advocate_html);
-      fullData.petitioner = $p('td').first().text().trim();
-    }
-    if (!fullData.respondent && raw.respondent_advocate_html) {
-      const $r = cheerio.load(raw.respondent_advocate_html);
-      fullData.respondent = $r('td').first().text().trim();
-    }
-
-    console.log('Final petitioner:', fullData.petitioner);
-    console.log('Final respondent:', fullData.respondent);
-    console.log('Final historyCount:', fullData.hearingHistory.length);
-    console.log('Raw keys:', Object.keys(raw));
-
-    return res.status(200).json({ success: true, case: fullData });
+    return res.status(200).json({ success: true, case: result });
 
   } catch (err) {
-    console.error('Case fetch error:', err.message);
+    console.error('Error:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-function parseHTML(html, cnr, raw) {
+function parseHTML(html, cnr) {
   const $ = cheerio.load(html);
   const result = { cnr: cnr.toUpperCase() };
 
-  // Court name — h2
+  // ── Court name ──
   result.courtName = $('h2').first().text().trim() || '';
 
-  // Parse all th→td pairs
-  result.caseType     = findAfterTh($, 'Case Type')            || '';
-  result.filingNumber = findAfterTh($, 'Filing Number')        || '';
-  result.filingDate   = findAfterTh($, 'Filing Date')          || '';
-  result.regNumber    = findAfterTh($, 'Registration Number')  || '';
-  result.regDate      = findAfterTh($, 'Registration Date')    || '';
-  result.cnrNumber    = findAfterTh($, 'CNR Number')           || cnr.toUpperCase();
-  result.firstDate    = findAfterTh($, 'First Hearing Date')   || '';
-  result.nextDate     = findAfterTh($, 'Next Hearing Date') || findAfterTh($, 'Decision Date') || '';
-  result.caseStage    = findAfterTh($, 'Case Stage') || findAfterTh($, 'Nature of Disposal') || '';
-  result.courtNo      = findAfterTh($, 'Court Number') || findAfterTh($, 'Court Number and Judge') || '';
-  result.judgeName    = result.courtNo; // eCourts combines these
+  // ── th→td pairs ──
+  const findTh = (label) => {
+    let val = '';
+    $('th').each((_, el) => {
+      if ($(el).text().trim().toLowerCase().includes(label.toLowerCase())) {
+        val = $(el).next('td').text().trim();
+        if (!val) val = $(el).closest('tr').find('td').first().text().trim();
+        if (val) return false;
+      }
+    });
+    return val;
+  };
 
-  // Petitioner / Respondent — parse properly from body text
-  const bodyText = $('body').text();
+  result.caseType     = findTh('Case Type')            || '';
+  result.filingNumber = findTh('Filing Number')        || '';
+  result.filingDate   = findTh('Filing Date')          || '';
+  result.regNumber    = findTh('Registration Number')  || '';
+  result.regDate      = findTh('Registration Date')    || '';
+  result.cnrNumber    = findTh('CNR Number')           || cnr.toUpperCase();
+  result.firstDate    = findTh('First Hearing Date')   || '';
+  result.nextDate     = findTh('Next Hearing Date') || findTh('Decision Date') || '';
+  result.caseStage    = findTh('Case Stage') || findTh('Nature of Disposal') || '';
+  result.courtNo      = findTh('Court Number') || findTh('Court Number and Judge') || '';
+  result.judgeName    = result.courtNo;
 
-  const petSection = bodyText.match(/Petitioner and Advocate([\s\S]*?)(?=Respondent and Advocate|Acts\s|Processes\s|FIR Details|$)/i);
-  if (petSection) {
-    const txt = petSection[1];
-    const nameMatch = txt.match(/1\)\s*([^\n]+)/);
-    const advMatch  = txt.match(/Advocate[-–:]\s*([^\n]+)/i);
-    if (nameMatch) result.petitioner  = nameMatch[1].replace(/\s*Advocate[-–:][\s\S]*/i,'').trim();
-    if (advMatch)  result.petAdvocate = advMatch[1].trim();
+  // ── Petitioner / Respondent from body text ──
+  const bodyText = $.text();
+
+  // Petitioner
+  const petBlock = bodyText.match(/Petitioner and Advocate([\s\S]*?)(?=Respondent and Advocate)/i);
+  if (petBlock) {
+    const txt = petBlock[1];
+    const nameM = txt.match(/1\)\s*([^\n]+)/);
+    const advM  = txt.match(/Advocate[-–:]\s*([^\n\d]+)/i);
+    if (nameM) result.petitioner  = nameM[1].replace(/\s*Advocate[-–:][\s\S]*/i, '').trim();
+    if (advM)  result.petAdvocate = advM[1].trim();
   }
 
-  const respSection = bodyText.match(/Respondent and Advocate([\s\S]*?)(?=Acts\s|Processes\s|FIR Details|Case History|Interim Orders|$)/i);
-  if (respSection) {
-    const txt = respSection[1];
-    // Get all respondent names (1) Name, 2) Name etc)
-    const allNames = [];
-    const nameRegex = /\d+\)\s*([^\n]+)/g;
+  // Respondent — multiple respondents support
+  const respBlock = bodyText.match(/Respondent and Advocate([\s\S]*?)(?=Acts\b|Processes\b|FIR Details|Case History)/i);
+  if (respBlock) {
+    const txt = respBlock[1];
+    const names = [];
+    const regex = /\d+\)\s*([^\n]+)/g;
     let m;
-    while ((m = nameRegex.exec(txt)) !== null) {
-      const name = m[1].replace(/\s*Advocate[-–:][\s\S]*/i,'').trim();
-      if (name) allNames.push(name);
+    while ((m = regex.exec(txt)) !== null) {
+      const name = m[1].replace(/\s*Advocate[-–:][\s\S]*/i, '').trim();
+      if (name && name.length > 0) names.push(name);
     }
-    result.respondent = allNames.join(', ') || '';
-    // Advocate
-    const advMatch = txt.match(/Advocate[-–:]\s*([^\n]+)/i);
-    if (advMatch) result.respAdvocate = advMatch[1].trim();
+    result.respondent = names.join(', ');
+    const advM = txt.match(/Advocate[-–:]\s*([^\n\d]+)/i);
+    if (advM) result.respAdvocate = advM[1].trim();
   }
 
   // Party name
-  if (result.petitioner && result.respondent) {
-    result.partyName = `${result.petitioner} vs ${result.respondent}`;
-  } else {
-    result.partyName = '';
-  }
+  result.partyName = (result.petitioner && result.respondent)
+    ? `${result.petitioner} vs ${result.respondent}` : '';
 
-  // Hearing history — Case History table
-  // eCourts table: Judge | Business on Date | Hearing Date | Purpose
+  // ── Case History ──
+  // Table: Judge | Business on Date | Hearing Date | Purpose
   const history = [];
   $('table').each((_, tbl) => {
-    const tblText = $(tbl).text().toLowerCase();
-    if (tblText.includes('hearing date') || tblText.includes('business on date') || tblText.includes('purpose')) {
+    const tblTxt = $(tbl).text().toLowerCase();
+    if (tblTxt.includes('hearing date') && tblTxt.includes('purpose')) {
       $(tbl).find('tr').each((_, row) => {
         const cells = $(row).find('td');
-        if (cells.length >= 3) {
-          // Try col index 2 = Hearing Date, col 3 = Purpose
+        if (cells.length >= 4) {
           const hearingDate = $(cells[2]).text().trim();
-          const purpose     = $(cells[3] || cells[1]).text().trim();
+          const purpose     = $(cells[3]).text().trim();
+          if (hearingDate.match(/\d{2}-\d{2}-\d{4}/) && purpose) {
+            history.push(`${hearingDate} — ${purpose}`);
+          }
+        } else if (cells.length >= 3) {
+          const hearingDate = $(cells[1]).text().trim();
+          const purpose     = $(cells[2]).text().trim();
           if (hearingDate.match(/\d{2}-\d{2}-\d{4}/) && purpose) {
             history.push(`${hearingDate} — ${purpose}`);
           }
@@ -175,73 +149,45 @@ function parseHTML(html, cnr, raw) {
       });
     }
   });
-
-  // Fallback: any row with date pattern
-  if (history.length === 0) {
-    $('tr').each((_, row) => {
-      const cells = $(row).find('td');
-      if (cells.length >= 2) {
-        const col0 = $(cells[0]).text().trim();
-        const col1 = $(cells[1]).text().trim();
-        const col2 = cells.length > 2 ? $(cells[2]).text().trim() : '';
-        // Check if any cell has date
-        const dateCell = [col0, col1, col2].find(c => c.match(/\d{2}-\d{2}-\d{4}/));
-        const purposeCell = [col0, col1, col2].find(c => c && !c.match(/\d{2}-\d{2}-\d{4}/) && c.length < 60);
-        if (dateCell && purposeCell && dateCell !== purposeCell) {
-          history.push(`${dateCell} — ${purposeCell}`);
-        }
-      }
-    });
-  }
-
-  result.hearingHistory = [...new Set(history)]; // deduplicate
+  result.hearingHistory = [...new Set(history)];
 
   // ── Interim Orders ──
   const orders = [];
-  let orderTableFound = false;
   $('table').each((_, tbl) => {
-    const tblText = $(tbl).text().toLowerCase();
-    if (tblText.includes('order number') || tblText.includes('order date') ||
-        tblText.includes('interim order') || tblText.includes('copy of order')) {
-      orderTableFound = true;
+    const tblTxt = $(tbl).text().toLowerCase();
+    if (tblTxt.includes('order number') || tblTxt.includes('copy of order')) {
       $(tbl).find('tr').each((_, row) => {
         const cells = $(row).find('td');
         if (cells.length >= 2) {
           const num  = $(cells[0]).text().trim();
           const date = $(cells[1]).text().trim();
           if (num.match(/^\d+$/) && date.match(/\d{2}-\d{2}-\d{4}/)) {
-            orders.push(`Order ${num} — ${date}`);
+            orders.push({ num, date });
           }
         }
       });
     }
   });
-  console.log('Order table found:', orderTableFound, 'Orders count:', orders.length);
-  // Also check body text for orders
-  const orderMatches = bodyText.match(/(\d+)\s+(\d{2}-\d{2}-\d{4})\s+Copy of order/gi) || [];
-  console.log('Order matches in text:', orderMatches.length);
-  if (orders.length === 0 && orderMatches.length > 0) {
-    orderMatches.forEach(m => {
-      const parts = m.match(/(\d+)\s+(\d{2}-\d{2}-\d{4})/);
-      if (parts) orders.push(`Order ${parts[1]} — ${parts[2]}`);
-    });
-  }
   result.orders = orders;
 
-  return result;
-}
-
-function findAfterTh($, label) {
-  let val = '';
-  $('th').each((_, el) => {
-    const text = $(el).text().trim().toLowerCase();
-    if (text.includes(label.toLowerCase())) {
-      // Try next sibling td
-      val = $(el).next('td').text().trim();
-      // Try parent row's td
-      if (!val) val = $(el).closest('tr').find('td').first().text().trim();
-      if (val) return false;
+  // ── Acts ──
+  const acts = [];
+  $('table').each((_, tbl) => {
+    const tblTxt = $(tbl).text().toLowerCase();
+    if (tblTxt.includes('under act') || tblTxt.includes('section')) {
+      $(tbl).find('tr').each((_, row) => {
+        const cells = $(row).find('td');
+        if (cells.length >= 2) {
+          const act     = $(cells[0]).text().trim();
+          const section = $(cells[1]).text().trim();
+          if (act && section && !act.toLowerCase().includes('under act')) {
+            acts.push(`${act} — Sec. ${section}`);
+          }
+        }
+      });
     }
   });
-  return val;
+  result.acts = acts;
+
+  return result;
 }
