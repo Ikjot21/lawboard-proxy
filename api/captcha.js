@@ -30,11 +30,13 @@ module.exports = async (req, res) => {
       maxRedirects: 5,
     });
 
-    // Extract session cookie
+    // Extract session cookie — eCourts uses SERVICES_SESSID
     const rawCookies = homeResp.headers['set-cookie'] || [];
     const cookieStr = rawCookies.map(c => c.split(';')[0]).join('; ');
-    const sessMatch = rawCookies.join('').match(/PHPSESSID=([^;]+)/);
+    const sessMatch = rawCookies.join('').match(/SERVICES_SESSID=([^;]+)/) ||
+                      rawCookies.join('').match(/PHPSESSID=([^;]+)/);
     const sessionId = sessMatch ? sessMatch[1] : Date.now().toString();
+    console.log('Session cookie:', cookieStr);
 
     // Step 2: Fetch CAPTCHA image with session
     const captchaResp = await axios.get(CAPTCHA_URL, {

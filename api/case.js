@@ -7,11 +7,16 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  const { cnr, captchaCode, cookieStr } = req.body || {};
+  const { cnr, captchaCode, cookieStr, sessionId } = req.body || {};
 
   if (!cnr || !captchaCode) {
     return res.status(400).json({ success: false, error: 'cnr and captchaCode required' });
   }
+
+  // Use cookieStr from captcha response directly
+  const cookie = cookieStr || (sessionId ? `SERVICES_SESSID=${sessionId}` : '');
+  console.log('Using cookie:', cookie);
+  console.log('CNR:', cnr, 'CAPTCHA:', captchaCode);
 
   try {
     const params = new URLSearchParams({
@@ -31,7 +36,7 @@ module.exports = async (req, res) => {
           'X-Requested-With':'XMLHttpRequest',
           'Referer':         `${ECOURTS_BASE}/`,
           'Origin':           ECOURTS_BASE,
-          'Cookie':           cookieStr || '',
+          'Cookie':           cookie,
         },
         timeout: 15000,
       }
