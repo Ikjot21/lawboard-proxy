@@ -128,17 +128,25 @@ function parseHTML(html, cnr, raw) {
     const txt = petSection[1];
     const nameMatch = txt.match(/1\)\s*([^\n]+)/);
     const advMatch  = txt.match(/Advocate[-–:]\s*([^\n]+)/i);
-    if (nameMatch) result.petitioner = nameMatch[1].replace(/Advocate[-–:][\s\S]*/i,'').trim();
+    if (nameMatch) result.petitioner  = nameMatch[1].replace(/\s*Advocate[-–:][\s\S]*/i,'').trim();
     if (advMatch)  result.petAdvocate = advMatch[1].trim();
   }
 
   const respSection = bodyText.match(/Respondent and Advocate([\s\S]*?)(?=Acts\s|Processes\s|FIR Details|Case History|Interim Orders|$)/i);
   if (respSection) {
     const txt = respSection[1];
-    const nameMatch = txt.match(/1\)\s*([^\n]+)/);
-    const advMatch  = txt.match(/Advocate[-–:]\s*([^\n]+)/i);
-    if (nameMatch) result.respondent = nameMatch[1].replace(/Advocate[-–:][\s\S]*/i,'').trim();
-    if (advMatch)  result.respAdvocate = advMatch[1].trim();
+    // Get all respondent names (1) Name, 2) Name etc)
+    const allNames = [];
+    const nameRegex = /\d+\)\s*([^\n]+)/g;
+    let m;
+    while ((m = nameRegex.exec(txt)) !== null) {
+      const name = m[1].replace(/\s*Advocate[-–:][\s\S]*/i,'').trim();
+      if (name) allNames.push(name);
+    }
+    result.respondent = allNames.join(', ') || '';
+    // Advocate
+    const advMatch = txt.match(/Advocate[-–:]\s*([^\n]+)/i);
+    if (advMatch) result.respAdvocate = advMatch[1].trim();
   }
 
   // Party name
@@ -187,6 +195,26 @@ function parseHTML(html, cnr, raw) {
   }
 
   result.hearingHistory = [...new Set(history)]; // deduplicate
+
+  // ── Interim Orders ──
+  const orders = [];
+  $('table').each((_, tbl) => {
+    const tblText = $(tbl).text().toLowerCase();
+    if (tblText.includes('order number') || tblText.includes('order date') || tblText.includes('interim order')) {
+      $(tbl).find('tr').each((_, row) => {
+        const cells = $(row).find('td');
+        if (cells.length >= 2) {
+          const num  = $(cells[0]).text().trim();
+          const date = $(cells[1]).text().trim();
+          if (num.match(/^\d+$/) && date.match(/\d{2}-\d{2}-\d{4}/)) {
+            orders.push(`Order ${num} — ${date}`);
+          }
+        }
+      });
+    }
+  });
+  result.orders = orders;
+
   return result;
 }
 
