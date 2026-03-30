@@ -1,73 +1,74 @@
-// api/captcha.js
 const axios = require('axios');
 
 const ECOURTS_BASE = 'https://services.ecourts.gov.in/ecourtindia_v6';
-const CAPTCHA_URL  = `${ECOURTS_BASE}/vendor/securimage/securimage_show.php`;
-
-const BROWSER_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-  'Accept-Language': 'en-IN,en;q=0.9',
-  'Accept-Encoding': 'gzip, deflate, br',
-  'Connection': 'keep-alive',
-  'Sec-Fetch-Dest': 'image',
-  'Sec-Fetch-Mode': 'no-cors',
-  'Sec-Fetch-Site': 'same-origin',
-};
 
 module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    // Step 1: Get session from homepage
-    const homeResp = await axios.get(`${ECOURTS_BASE}/`, {
-      headers: {
-        'User-Agent': BROWSER_HEADERS['User-Agent'],
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-IN,en;q=0.9',
-      },
-      timeout: 10000,
-      maxRedirects: 5,
+    // Use eCourts own getCaptcha endpoint — same as browser does
+    const params = new URLSearchParams({
+      'ajax_req':  'true',
+      'app_token': '',
     });
 
-    // Extract session cookie — eCourts uses SERVICES_SESSID
-    const rawCookies = homeResp.headers['set-cookie'] || [];
-    const cookieStr = rawCookies.map(c => c.split(';')[0]).join('; ');
-    const sessMatch = rawCookies.join('').match(/SERVICES_SESSID=([^;]+)/) ||
-                      rawCookies.join('').match(/PHPSESSID=([^;]+)/);
-    const sessionId = sessMatch ? sessMatch[1] : Date.now().toString();
-    console.log('Session cookie:', cookieStr);
+    const captchaResp = await axios.post(
+      `${ECOURTS_BASE}/?p=casestatus/getCaptcha`,
+      params.toString(),
+      {
+        headers: {
+          'User-Agent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Content-Type':     'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Referer':          `${ECOURTS_BASE}/`,
+          'Origin':            ECOURTS_BASE,
+        },
+        timeout: 12000,
+      }
+    );
 
-    // Step 2: Fetch CAPTCHA image with session
-    const captchaResp = await axios.get(CAPTCHA_URL, {
-      headers: {
-        ...BROWSER_HEADERS,
-        'Referer': `${ECOURTS_BASE}/`,
-        'Cookie': cookieStr || `PHPSESSID=${sessionId}`,
-      },
-      responseType: 'arraybuffer',
-      timeout: 10000,
-    });
+    // Extract session cookie from response
+    const rawCookies = captchaResp.headers['set-cookie'] || [];
+    const cookieStr  = rawCookies.map(c => c.split(';')[0]).join('; ');
+    console.log('getCaptcha cookie:', cookieStr);
+    console.log('getCaptcha response:', JSON.stringify(captchaResp.data).substring(0, 300));
 
-    const imageBuffer = Buffer.from(captchaResp.data);
-    const contentType = captchaResp.headers['content-type'] || 'image/png';
-    const captchaBase64 = `data:${contentType};base64,${imageBuffer.toString('base64')}`;
+    // Response is HTML with captcha image — extract img src token
+    const html = typeof captchaResp.data === 'string'
+      ? captchaResp.data
+      : JSON.stringify(captchaResp.data);
+
+    // Extract securimage token from img src
+    const tokenMatch = html.match(/securimage_show\.php\?([a-f0-9]+)/);
+    const captchaToken = tokenMatch ? tokenMatch[1] : '';
+    console.log('Captcha token:', captchaToken);
+
+    // Now fetch the actual CAPTCHA image using same session
+    const imgResp = await axios.get(
+      `${ECOURTS_BASE}/vendor/securimage/securimage_show.php?${captchaToken}`,
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Referer':    `${ECOURTS_BASE}/`,
+          'Cookie':      cookieStr,
+        },
+        responseType: 'arraybuffer',
+        timeout: 10000,
+      }
+    );
+
+    const contentType   = imgResp.headers['content-type'] || 'image/png';
+    const captchaBase64 = `data:${contentType};base64,${Buffer.from(imgResp.data).toString('base64')}`;
 
     return res.status(200).json({
       success: true,
       captchaBase64,
-      sessionId,
       cookieStr,
+      captchaToken,
     });
 
   } catch (err) {
-    console.error('Captcha fetch error:', err.message);
-    // Return error details for debugging
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-      status: err.response?.status,
-      details: err.response?.data?.toString()?.substring(0, 200),
-    });
+    console.error('Captcha error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
