@@ -106,18 +106,23 @@ function parseHTML(html, cnr) {
   }
 
   // Respondent — multiple respondents support
-  const respBlock = bodyText.match(/Respondent and Advocate([\s\S]*?)(?=\n\s*Acts\b|\n\s*Processes\b|\n\s*FIR Details|\n\s*Case History)/i);
+  const respBlock = bodyText.match(/Respondent and Advocate([\s\S]{0,500})(?=Acts\b|Processes\b|FIR Details|Case History|Under Act)/i);
   if (respBlock) {
     const txt = respBlock[1];
     const names = [];
     const regex = /\d+\)\s*([^\n]+)/g;
     let m;
     while ((m = regex.exec(txt)) !== null) {
-      const name = m[1].replace(/\s*Advocate[-–\s]*[-:][^\n]*/i, '').trim();
-      if (name && name.length > 0 && name.length < 80) names.push(name);
+      // Stop at Advocate, Acts, or IPC section numbers
+      let name = m[1]
+        .replace(/\s*Advocate[-–\s]*[-:][^\n]*/i, '')
+        .replace(/\s*[A-Z]{3,}.*Act.*/i, '')
+        .replace(/\s*\d{2,3}[,\s].*/,'')
+        .trim();
+      if (name && name.length > 0 && name.length < 60) names.push(name);
     }
     result.respondent = names.join(', ');
-    const advM = txt.match(/Advocate[-–:]\s*([A-Z][^\n\d]+)/i);
+    const advM = txt.match(/Advocate[-–:]\s*([A-Z][A-Z\s]+?)(?=\n|\d\)|$)/i);
     if (advM) result.respAdvocate = advM[1].trim();
   }
 
