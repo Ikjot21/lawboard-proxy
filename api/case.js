@@ -38,6 +38,9 @@ module.exports = async (req, res) => {
     );
 
     const html = typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data);
+    console.log('Status:', resp.status);
+    console.log('Response length:', html.length);
+    console.log('Response preview:', html.substring(0, 500));
 
     // Check for CAPTCHA error
     if (html.toLowerCase().includes('invalid captcha') ||
