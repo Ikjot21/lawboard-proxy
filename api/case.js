@@ -120,25 +120,26 @@ function parseHTML(html, cnr, raw) {
   result.courtNo      = findAfterTh($, 'Court Number') || findAfterTh($, 'Court Number and Judge') || '';
   result.judgeName    = result.courtNo; // eCourts combines these
 
-  // Petitioner — look for "Petitioner and Advocate" section
-  $('h4, h5, strong, b').each((_, el) => {
-    const txt = $(el).text().trim().toLowerCase();
-    if (txt.includes('petitioner') && txt.includes('advocate')) {
-      const section = $(el).parent().find('td, p, div').first().text().trim();
-      if (section && !result.petitioner) result.petitioner = section.split('\n')[0].trim();
-    }
-    if (txt.includes('respondent') && txt.includes('advocate')) {
-      const section = $(el).parent().find('td, p, div').first().text().trim();
-      if (section && !result.respondent) result.respondent = section.split('\n')[0].trim();
-    }
-  });
-
-  // Also try numbered lists like "1) Name\n   Advocate- ..."
+  // Petitioner / Respondent — parse properly from body text
   const bodyText = $('body').text();
-  const petMatch = bodyText.match(/Petitioner and Advocate[\s\S]*?1\)\s*([^\n]+)/i);
-  if (petMatch && !result.petitioner) result.petitioner = petMatch[1].trim();
-  const respMatch = bodyText.match(/Respondent and Advocate[\s\S]*?1\)\s*([^\n]+)/i);
-  if (respMatch && !result.respondent) result.respondent = respMatch[1].trim();
+
+  const petSection = bodyText.match(/Petitioner and Advocate([\s\S]*?)(?=Respondent and Advocate|Acts\s|Processes\s|FIR Details|$)/i);
+  if (petSection) {
+    const txt = petSection[1];
+    const nameMatch = txt.match(/1\)\s*([^\n]+)/);
+    const advMatch  = txt.match(/Advocate[-–:]\s*([^\n]+)/i);
+    if (nameMatch) result.petitioner = nameMatch[1].replace(/Advocate[-–:][\s\S]*/i,'').trim();
+    if (advMatch)  result.petAdvocate = advMatch[1].trim();
+  }
+
+  const respSection = bodyText.match(/Respondent and Advocate([\s\S]*?)(?=Acts\s|Processes\s|FIR Details|Case History|Interim Orders|$)/i);
+  if (respSection) {
+    const txt = respSection[1];
+    const nameMatch = txt.match(/1\)\s*([^\n]+)/);
+    const advMatch  = txt.match(/Advocate[-–:]\s*([^\n]+)/i);
+    if (nameMatch) result.respondent = nameMatch[1].replace(/Advocate[-–:][\s\S]*/i,'').trim();
+    if (advMatch)  result.respAdvocate = advMatch[1].trim();
+  }
 
   // Party name
   if (result.petitioner && result.respondent) {
