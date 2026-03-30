@@ -105,7 +105,6 @@ function parseHTML(html, cnr) {
     if (advM)  result.petAdvocate = advM[1].trim();
   }
 
-  // Respondent — multiple respondents support
   const respBlock = bodyText.match(/Respondent and Advocate([\s\S]{0,500})(?=Acts\b|Processes\b|FIR Details|Case History|Under Act)/i);
   if (respBlock) {
     const txt = respBlock[1];
@@ -113,13 +112,16 @@ function parseHTML(html, cnr) {
     const regex = /\d+\)\s*([^\n]+)/g;
     let m;
     while ((m = regex.exec(txt)) !== null) {
-      // Stop at Advocate, Acts, or IPC section numbers
       let name = m[1]
-        .replace(/\s*Advocate[-–\s]*[-:][^\n]*/i, '')
-        .replace(/\s*[A-Z]{3,}.*Act.*/i, '')
-        .replace(/\s*\d{2,3}[,\s].*/,'')
+        .replace(/\s*Advocate[-–\s]*[-:].*/i, '')  // remove Advocate part
+        .replace(/[,\s]*[\d]+\([\d\w]+\).*/g, '')   // remove section numbers like 376(2)
+        .replace(/[A-Z][a-z]+\s+[A-Z][a-z]+\s+Act.*/i, '') // remove Act names
+        .replace(/[,\s]+[A-Z]{1,3}[,\s]*[\d]+.*/g, '') // remove IPC codes
         .trim();
-      if (name && name.length > 0 && name.length < 60) names.push(name);
+      // Only keep if looks like a name (letters, spaces, @, digits)
+      if (name && name.length > 1 && name.length < 60 && /[A-Z]/.test(name)) {
+        names.push(name);
+      }
     }
     result.respondent = names.join(', ');
     const advM = txt.match(/Advocate[-–:]\s*([A-Z][A-Z\s]+?)(?=\n|\d\)|$)/i);
