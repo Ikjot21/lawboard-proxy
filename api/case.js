@@ -129,7 +129,12 @@ function parseHTML(html, cnr) {
     });
     result.respondent = names.join(', ');
     const advM = txt.match(/Advocate[-–:]\s*([A-Z][A-Z\s]+)/i);
-    if (advM) result.respAdvocate = advM[1].trim();
+    if (advM) {
+      result.respAdvocate = advM[1]
+        .replace(/\s*Acts.*/i, '')
+        .replace(/\s*Under.*/i, '')
+        .trim();
+    }
   }
 
   result.partyName = (result.petitioner && result.respondent)
