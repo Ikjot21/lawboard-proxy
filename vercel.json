@@ -1,8 +1,9 @@
 {
   "version": 2,
   "functions": {
-    "api/captcha.js": { "maxDuration": 15 },
-    "api/case.js":    { "maxDuration": 15 }
+    "api/captcha.js":   { "maxDuration": 15 },
+    "api/case.js":      { "maxDuration": 15 },
+    "api/causelist.js": { "maxDuration": 20 }
   },
   "headers": [
     {
