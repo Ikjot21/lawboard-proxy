@@ -115,33 +115,47 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, courts });
     }
 
-    // ── Cause List CAPTCHA — use full captcha flow ──
+    // ── Cause List CAPTCHA — must use cause_list page session ──
     if (action === 'captcha') {
       try {
-        // Step 1: Get session + token from getCaptcha
-        const captchaPageResp = await axios.get(
-          `${BASE}/?p=casestatus/getCaptcha`,
-          { headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` }, timeout: 12000 }
-        );
-        const setCookie = captchaPageResp.headers['set-cookie'] || [];
+        // Step 1: Load cause_list page to get proper session
+        const pageResp = await axios.get(`${BASE}/?p=cause_list/index&app_token=`, {
+          headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
+          timeout: 12000,
+        });
+        const setCookie = pageResp.headers['set-cookie'] || [];
         const cookieStr = setCookie.map(c => c.split(';')[0]).join('; ');
-        const rawData = captchaPageResp.data;
-        // Extract token
-        const tokenMatch = JSON.stringify(rawData).match(/([a-f0-9]{32})/);
-        const captchaToken = tokenMatch ? tokenMatch[1] : '';
-        console.log('CauseList captcha token:', captchaToken, 'cookie:', cookieStr.slice(0,30));
-        // Step 2: Get CAPTCHA image
+        console.log('CauseList page cookie:', cookieStr.slice(0,40));
+
+        // Step 2: Get CAPTCHA image from securimage with this session
         const imgResp = await axios.get(
-          `${BASE}/vendor/securimage/securimage_show.php?${captchaToken}`,
-          { headers: { 'User-Agent': H['User-Agent'], 'Cookie': cookieStr }, responseType: 'arraybuffer', timeout: 10000 }
+          `${BASE}/securimage/securimage_show.php`,
+          {
+            headers: { 'User-Agent': H['User-Agent'], 'Cookie': cookieStr, 'Referer': `${BASE}/?p=cause_list/index` },
+            responseType: 'arraybuffer',
+            timeout: 10000,
+          }
         );
-        const contentType = imgResp.headers['content-type'] || 'image/png';
-        const captchaBase64 = `data:${contentType};base64,${Buffer.from(imgResp.data).toString('base64')}`;
-        console.log('CauseList captcha imgLen:', captchaBase64.length);
-        return res.status(200).json({ success: true, captchaBase64, cookieStr, captchaToken });
+        const captchaBase64 = `data:image/png;base64,${Buffer.from(imgResp.data).toString('base64')}`;
+        console.log('CauseList captcha imgLen:', captchaBase64.length, 'cookie:', cookieStr.slice(0,30));
+        return res.status(200).json({ success: true, captchaBase64, cookieStr, captchaToken: '' });
       } catch(e) {
         console.log('CauseList captcha error:', e.message);
-        return res.status(500).json({ success: false, error: e.message });
+        // Fallback to vendor path
+        try {
+          const pageResp2 = await axios.get(`${BASE}/?p=cause_list/index&app_token=`, {
+            headers: { 'User-Agent': H['User-Agent'] }, timeout: 10000,
+          });
+          const c2 = (pageResp2.headers['set-cookie'] || []).map(c => c.split(';')[0]).join('; ');
+          const img2 = await axios.get(`${BASE}/vendor/securimage/securimage_show.php`, {
+            headers: { 'User-Agent': H['User-Agent'], 'Cookie': c2 },
+            responseType: 'arraybuffer', timeout: 10000,
+          });
+          const b64 = `data:image/png;base64,${Buffer.from(img2.data).toString('base64')}`;
+          return res.status(200).json({ success: true, captchaBase64: b64, cookieStr: c2, captchaToken: '' });
+        } catch(e2) {
+          return res.status(500).json({ success: false, error: e2.message });
+        }
       }
     }
 
