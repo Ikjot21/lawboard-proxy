@@ -60,30 +60,19 @@ module.exports = async (req, res) => {
 
     // ── Step 2: Get Districts ───────────────────────────
     if (action === 'districts') {
-      // Get app_token from cause_list page first
-      let appToken = req.body.app_token || '';
-      let cookieHeader = '';
-      try {
-        const pageResp = await axios.get(`${BASE}/?p=cause_list/index&app_token=`, {
-          headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
-          timeout: 12000,
-        });
-        const $p = cheerio.load(pageResp.data);
-        appToken = $p('input[name="app_token"]').val()?.toString() ||
-                   $p('#app_token').val()?.toString() || '';
-        // Get cookies
-        const setCookie = pageResp.headers['set-cookie'];
-        if (setCookie) cookieHeader = setCookie.map(c => c.split(';')[0]).join('; ');
-        console.log('appToken:', appToken ? appToken.slice(0,10) : 'empty', '| cookie:', cookieHeader.slice(0,30));
-      } catch(e) { console.log('Page fetch failed:', e.message); }
-
-      const params = new URLSearchParams({ state_code, ajax_req: 'true', app_token: appToken });
-      const resp = await axios.post(`${BASE}/?p=casestatus/fillDistrict`, params.toString(), {
-        headers: { ...H, 'Cookie': cookieHeader },
-        timeout: 12000,
-      });
-      console.log('Districts response type:', typeof resp.data, '| preview:', JSON.stringify(resp.data).slice(0,150));
-      const districts = parseSelectOptions(resp.data);
+      let districts = [];
+      // Try multiple endpoints
+      for (const endpoint of ['cause_list/getDistrictName', 'casestatus/fillDistrict', 'casestatus/getDistrictName']) {
+        try {
+          const params = new URLSearchParams({ state_code, ajax_req: 'true', app_token: '' });
+          const resp = await axios.post(`${BASE}/?p=${endpoint}`, params.toString(), {
+            headers: H, timeout: 10000,
+          });
+          console.log(`${endpoint} response:`, typeof resp.data, JSON.stringify(resp.data).slice(0,200));
+          const parsed = parseSelectOptions(resp.data);
+          if (parsed.length > 0) { districts = parsed; break; }
+        } catch(e) { console.log(`${endpoint} failed:`, e.message); }
+      }
       return res.status(200).json({ success: true, districts });
     }
 
