@@ -115,23 +115,29 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, courts });
     }
 
-    // ── Cause List CAPTCHA — use same captcha endpoint as CNR ──
+    // ── Cause List CAPTCHA — use full captcha flow ──
     if (action === 'captcha') {
-      // Use same captcha as CNR — same securimage session works
       try {
-        const captchaResp = await axios.get(
+        // Step 1: Get session + token from getCaptcha
+        const captchaPageResp = await axios.get(
           `${BASE}/?p=casestatus/getCaptcha`,
-          {
-            headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
-            timeout: 12000,
-          }
+          { headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` }, timeout: 12000 }
         );
-        const setCookie = captchaResp.headers['set-cookie'] || [];
+        const setCookie = captchaPageResp.headers['set-cookie'] || [];
         const cookieStr = setCookie.map(c => c.split(';')[0]).join('; ');
-        const raw = captchaResp.data;
-        const captchaBase64 = raw.captchaBase64 || raw.img || '';
-        const captchaToken  = raw.captchaToken  || raw.token || '';
-        console.log('CauseList captcha: cookieLen=', cookieStr.length, 'imgLen=', captchaBase64.length);
+        const rawData = captchaPageResp.data;
+        // Extract token
+        const tokenMatch = JSON.stringify(rawData).match(/([a-f0-9]{32})/);
+        const captchaToken = tokenMatch ? tokenMatch[1] : '';
+        console.log('CauseList captcha token:', captchaToken, 'cookie:', cookieStr.slice(0,30));
+        // Step 2: Get CAPTCHA image
+        const imgResp = await axios.get(
+          `${BASE}/vendor/securimage/securimage_show.php?${captchaToken}`,
+          { headers: { 'User-Agent': H['User-Agent'], 'Cookie': cookieStr }, responseType: 'arraybuffer', timeout: 10000 }
+        );
+        const contentType = imgResp.headers['content-type'] || 'image/png';
+        const captchaBase64 = `data:${contentType};base64,${Buffer.from(imgResp.data).toString('base64')}`;
+        console.log('CauseList captcha imgLen:', captchaBase64.length);
         return res.status(200).json({ success: true, captchaBase64, cookieStr, captchaToken });
       } catch(e) {
         console.log('CauseList captcha error:', e.message);
