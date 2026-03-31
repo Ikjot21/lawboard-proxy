@@ -20,53 +20,59 @@ module.exports = async (req, res) => {
 
   try {
 
-    // ── Step 1: Get States ──────────────────────────────
+    // ── Step 1: Get States (with app_token) ──────────────────
     if (action === 'states') {
-      // Try cause_list/index first, fallback to casestatus/index
-      let html = '';
-      for (const path of ['cause_list/index', 'casestatus/index', 'causelist/index']) {
-        try {
-          const resp = await axios.get(`${BASE}/?p=${path}&app_token=`, {
-            headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
-            timeout: 12000,
-          });
-          if (resp.status === 200) { html = resp.data; console.log('States from:', path); break; }
-        } catch(e) { console.log('Failed:', path, e.message); }
-      }
-      const $ = cheerio.load(html);
-      const states = [];
-      $('select').each((_, sel) => {
-        const id = ($(sel).attr('id') || '').toLowerCase();
-        const nm = ($(sel).attr('name') || '').toLowerCase();
-        if (id.includes('state') || nm.includes('state')) {
-          $(sel).find('option').each((_, el) => {
-            const val = $(el).val()?.toString().trim();
-            const txt = $(el).text().trim();
-            if (val && val !== '0' && txt) states.push({ code: val, name: txt });
-          });
+      // First get app_token from the page
+      let appToken = '';
+      try {
+        const pageResp = await axios.get(`${BASE}/?p=cause_list/index&app_token=`, {
+          headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
+          timeout: 12000,
+        });
+        const $p = cheerio.load(pageResp.data);
+        appToken = $p('input[name="app_token"]').val() ||
+                   $p('#app_token').val() || '';
+        console.log('app_token found:', appToken ? 'yes' : 'no', '| len:', pageResp.data.length);
+
+        // Try to parse states from this page
+        const states = [];
+        $p('select').each((_, sel) => {
+          const id = ($p(sel).attr('id') || '').toLowerCase();
+          const nm = ($p(sel).attr('name') || '').toLowerCase();
+          if (id.includes('state') || nm.includes('state')) {
+            $p(sel).find('option').each((_, el) => {
+              const val = $p(el).val()?.toString().trim();
+              const txt = $p(el).text().trim();
+              if (val && val !== '0' && txt) states.push({ code: val, name: txt });
+            });
+          }
+        });
+        if (states.length > 0) {
+          console.log('States from page:', states.length);
+          return res.status(200).json({ success: true, states, appToken });
         }
-      });
-      console.log('States found:', states.length, '| HTML len:', html.length);
-      if (states.length === 0) {
-        // Hardcode common states as fallback
-        return res.status(200).json({ success: true, states: HARDCODED_STATES });
-      }
-      return res.status(200).json({ success: true, states });
+      } catch(e) { console.log('Page fetch failed:', e.message); }
+
+      // Return hardcoded states as fallback
+      console.log('Using hardcoded states');
+      return res.status(200).json({ success: true, states: HARDCODED_STATES, appToken });
     }
 
     // ── Step 2: Get Districts ───────────────────────────
     if (action === 'districts') {
-      const params = new URLSearchParams({ state_code, ajax_req: 'true', app_token: '' });
+      const appToken = req.body.app_token || '';
+      const params = new URLSearchParams({ state_code, ajax_req: 'true', app_token: appToken });
       const resp = await axios.post(`${BASE}/?p=casestatus/fillDistrict`, params.toString(),
         { headers: H, timeout: 12000 });
-      console.log('Districts raw type:', typeof resp.data);
+      console.log('Districts raw type:', typeof resp.data, '| preview:', JSON.stringify(resp.data).slice(0,100));
       const districts = parseSelectOptions(resp.data);
       return res.status(200).json({ success: true, districts });
     }
 
     // ── Step 3: Get Court Complexes ─────────────────────
     if (action === 'complexes') {
-      const params = new URLSearchParams({ state_code, dist_code, ajax_req: 'true', app_token: '' });
+      const appToken = req.body.app_token || '';
+      const params = new URLSearchParams({ state_code, dist_code, ajax_req: 'true', app_token: appToken });
       const resp = await axios.post(`${BASE}/?p=casestatus/fillcomplex`, params.toString(),
         { headers: H, timeout: 12000 });
       const complexes = parseSelectOptions(resp.data);
