@@ -118,28 +118,37 @@ module.exports = async (req, res) => {
     // ── Cause List CAPTCHA ──────────────────────────────
     if (action === 'captcha') {
       try {
-        // Get cause_list session
-        const pageResp = await axios.get(`${BASE}/?p=cause_list/index&app_token=`, {
+        const { wrapper } = require('axios-cookiejar-support');
+        const { CookieJar } = require('tough-cookie');
+        const jar = new CookieJar();
+        const client = wrapper(axios.create({ jar }));
+
+        // Step 1: Load cause_list page — sets session cookies in jar
+        const pageResp = await client.get(`${BASE}/?p=cause_list/index&app_token=`, {
           headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
           timeout: 12000,
         });
-        const setCookie = pageResp.headers['set-cookie'] || [];
-        const cookieStr = setCookie.map(c => c.split(';')[0]).join('; ');
+        console.log('CauseList page status:', pageResp.status, '| len:', pageResp.data.length);
 
         // Extract captcha token from page HTML
         const tokenMatch = pageResp.data.match(/securimage_show\.php\?([a-f0-9]+)/);
         const captchaToken = tokenMatch ? tokenMatch[1] : '';
-        console.log('CauseList captcha token:', captchaToken, '| cookie:', cookieStr.slice(0,40));
+        console.log('CauseList captcha token:', captchaToken || 'NOT FOUND');
 
-        // Get CAPTCHA image using vendor path (same as what eCourts uses)
+        // Step 2: Get CAPTCHA image with SAME jar (same session)
         const imgUrl = captchaToken
           ? `${BASE}/vendor/securimage/securimage_show.php?${captchaToken}`
           : `${BASE}/vendor/securimage/securimage_show.php`;
-        const imgResp = await axios.get(imgUrl, {
-          headers: { 'User-Agent': H['User-Agent'], 'Cookie': cookieStr,
-            'Referer': `${BASE}/?p=cause_list/index` },
+        const imgResp = await client.get(imgUrl, {
+          headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/?p=cause_list/index` },
           responseType: 'arraybuffer', timeout: 10000,
         });
+
+        // Get all cookies from jar
+        const cookies = await jar.getCookies(BASE);
+        const cookieStr = cookies.map(c => `${c.key}=${c.value}`).join('; ');
+        console.log('CauseList jar cookies:', cookieStr.slice(0, 80));
+
         const contentType = imgResp.headers['content-type'] || 'image/png';
         const captchaBase64 = `data:${contentType};base64,${Buffer.from(imgResp.data).toString('base64')}`;
         console.log('CauseList captcha imgLen:', captchaBase64.length);
