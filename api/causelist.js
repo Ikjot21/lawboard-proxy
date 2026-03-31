@@ -159,21 +159,21 @@ module.exports = async (req, res) => {
       }
     }
 
-    // ── Step 5: Submit & Get Cause List ─────────────────
+    // ── Step 5: Submit & Get Cause List (okhttp bypasses CAPTCHA) ──
     if (action === 'list') {
       const params = new URLSearchParams({
-        CL_court_no:           court_no,        // e.g. "1^13"
-        causelist_date:        causelist_date,   // e.g. "31-03-2026"
-        cause_list_captcha_code: captchaCode,
-        court_name_txt:        '',
+        CL_court_no:             court_no,
+        causelist_date:          causelist_date,
+        cause_list_captcha_code: '',          // empty — okhttp bypasses CAPTCHA
+        court_name_txt:          '',
         state_code,
         dist_code,
-        court_complex_code:    complex_code,
-        est_code:              est_code || 'null',
-        cicri:                 req.body.cicri || 'cri',
-        selprevdays:           '0',
-        ajax_req:              'true',
-        app_token:             '',
+        court_complex_code:      complex_code,
+        est_code:                est_code || 'null',
+        cicri:                   req.body.cicri || 'cri',
+        selprevdays:             '0',
+        ajax_req:                'true',
+        app_token:               '',
       });
       const resp = await axios.post(`${BASE}/?p=cause_list/submitCauseList`, params.toString(), {
         headers: { ...H, 'Cookie': cookieStr || '',
@@ -277,17 +277,28 @@ function parseCourts(data) {
 function parseCauseListHTML(html) {
   const $ = cheerio.load(html);
   const cases = [];
+  let currentStage = '';
+
   $('table tr').each((_, row) => {
     const cells = $(row).find('td');
-    if (cells.length >= 2) {
-      const c0 = $(cells[0]).text().trim();
-      const c1 = $(cells[1]).text().trim();
-      const c2 = cells.length >= 3 ? $(cells[2]).text().trim() : '';
-      const c3 = cells.length >= 4 ? $(cells[3]).text().trim() : '';
-      const c4 = cells.length >= 5 ? $(cells[4]).text().trim() : '';
-      if (c0.match(/^\d+$/) && c1) {
-        cases.push({ srNo: c0, caseNo: c1, parties: c2, advocate: c3, stage: c4 });
-      }
+    // Stage header row — colspan=6 with stage name
+    if (cells.length === 1 && $(cells[0]).attr('colspan')) {
+      const txt = $(cells[0]).text().trim();
+      if (txt && !txt.includes('---') && txt.length < 60) currentStage = txt;
+      return;
+    }
+    if (cells.length >= 3) {
+      const srNo = $(cells[0]).text().trim();
+      if (!srNo.match(/^\d+$/)) return;
+      // Case number — text without "View"
+      const caseNoRaw = $(cells[1]).text().trim().replace(/^View\s*/i, '').trim();
+      // CNR from onClick
+      const onClick = $(cells[1]).find('a').attr('onclick') || '';
+      const cnrMatch = onClick.match(/'([A-Z]{4}\d{16})'/);
+      const cnr = cnrMatch ? cnrMatch[1] : '';
+      const parties  = $(cells[2]).text().trim().replace(/\n+/g, ' vs ');
+      const advocate = cells.length >= 4 ? $(cells[3]).text().trim().replace(/\n+/g, ', ') : '';
+      cases.push({ srNo, caseNo: caseNoRaw, cnr, parties, advocate, stage: currentStage });
     }
   });
   return cases;
