@@ -180,27 +180,28 @@ const HARDCODED_STATES = [
   {code:'37',name:'West Bengal'},
 ];
 function parseSelectOptions(data) {
-  if (Array.isArray(data)) {
-    return data.map(d => ({
-      code: d.dist_code || d.complex_code || d.court_code || d.code || d.id,
-      name: d.dist_name || d.complex_name || d.court_name || d.name,
-    })).filter(d => d.code && d.name);
-  }
-  if (typeof data === 'object') {
-    const vals = Object.values(data);
-    if (vals.length && typeof vals[0] === 'object') {
-      return vals.map(d => ({
-        code: d.dist_code || d.complex_code || d.code || d.id,
-        name: d.dist_name || d.complex_name || d.name,
-      })).filter(d => d.code && d.name);
+  // eCourts returns {dist_list: "<option>...</option>", status:1}
+  let html = '';
+  if (typeof data === 'string') {
+    html = data;
+  } else if (typeof data === 'object' && data !== null) {
+    // Find any key ending in _list (dist_list, court_list, complex_list)
+    const listKey = Object.keys(data).find(k => k.endsWith('_list'));
+    if (listKey) {
+      html = data[listKey];
+    } else if (data.html) {
+      html = data.html;
     }
   }
-  const $ = cheerio.load(data);
+  if (!html) return [];
+  const $ = cheerio.load(html);
   const items = [];
   $('option').each((_, el) => {
     const val = $(el).val()?.toString().trim();
     const txt = $(el).text().trim();
-    if (val && val !== '0' && txt) items.push({ code: val, name: txt });
+    if (val && val !== '' && val !== '0' && txt && !txt.toLowerCase().startsWith('select')) {
+      items.push({ code: val, name: txt });
+    }
   });
   return items;
 }
