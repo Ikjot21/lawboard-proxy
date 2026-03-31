@@ -97,12 +97,11 @@ module.exports = async (req, res) => {
         ajax_req: 'true',
         app_token: '',
       });
-      const resp = await axios.post(`${BASE}/?p=casestatus/set_data`, params.toString(),
+      await axios.post(`${BASE}/?p=casestatus/set_data`, params.toString(),
         { headers: H, timeout: 12000 });
-      // Then get cause list courts
+      // Get cause list courts
       const params2 = new URLSearchParams({
-        state_code,
-        dist_code,
+        state_code, dist_code,
         court_complex_code: complex_code,
         est_code,
         search_act: 'undefined',
@@ -116,6 +115,29 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, courts });
     }
 
+    // ── Cause List CAPTCHA ──────────────────────────────
+    if (action === 'captcha') {
+      // Get CAPTCHA from cause list page session
+      const pageResp = await axios.get(`${BASE}/?p=cause_list/index&app_token=`, {
+        headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
+        timeout: 12000,
+      });
+      const setCookie = pageResp.headers['set-cookie'] || [];
+      const cookieStr = setCookie.map(c => c.split(';')[0]).join('; ');
+      // Get CAPTCHA image
+      const captchaResp = await axios.get(`${BASE}/securimage/securimage_show.php`, {
+        headers: { 'User-Agent': H['User-Agent'], 'Cookie': cookieStr },
+        responseType: 'arraybuffer',
+        timeout: 10000,
+      });
+      const base64 = Buffer.from(captchaResp.data).toString('base64');
+      return res.status(200).json({
+        success: true,
+        captchaBase64: `data:image/png;base64,${base64}`,
+        cookieStr,
+      });
+    }
+
     // ── Step 5: Submit & Get Cause List ─────────────────
     if (action === 'list') {
       const params = new URLSearchParams({
@@ -127,7 +149,7 @@ module.exports = async (req, res) => {
         dist_code,
         court_complex_code:    complex_code,
         est_code:              est_code || 'null',
-        cicri:                 'cri',
+        cicri:                 req.body.cicri || 'cri',
         selprevdays:           '0',
         ajax_req:              'true',
         app_token:             '',
