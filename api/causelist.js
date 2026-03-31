@@ -115,27 +115,28 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, courts });
     }
 
-    // ── Cause List CAPTCHA ──────────────────────────────
+    // ── Cause List CAPTCHA — use same captcha endpoint as CNR ──
     if (action === 'captcha') {
-      // Get CAPTCHA from cause list page session
-      const pageResp = await axios.get(`${BASE}/?p=cause_list/index&app_token=`, {
-        headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
-        timeout: 12000,
-      });
-      const setCookie = pageResp.headers['set-cookie'] || [];
-      const cookieStr = setCookie.map(c => c.split(';')[0]).join('; ');
-      // Get CAPTCHA image
-      const captchaResp = await axios.get(`${BASE}/securimage/securimage_show.php`, {
-        headers: { 'User-Agent': H['User-Agent'], 'Cookie': cookieStr },
-        responseType: 'arraybuffer',
-        timeout: 10000,
-      });
-      const base64 = Buffer.from(captchaResp.data).toString('base64');
-      return res.status(200).json({
-        success: true,
-        captchaBase64: `data:image/png;base64,${base64}`,
-        cookieStr,
-      });
+      // Use same captcha as CNR — same securimage session works
+      try {
+        const captchaResp = await axios.get(
+          `${BASE}/?p=casestatus/getCaptcha`,
+          {
+            headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
+            timeout: 12000,
+          }
+        );
+        const setCookie = captchaResp.headers['set-cookie'] || [];
+        const cookieStr = setCookie.map(c => c.split(';')[0]).join('; ');
+        const raw = captchaResp.data;
+        const captchaBase64 = raw.captchaBase64 || raw.img || '';
+        const captchaToken  = raw.captchaToken  || raw.token || '';
+        console.log('CauseList captcha: cookieLen=', cookieStr.length, 'imgLen=', captchaBase64.length);
+        return res.status(200).json({ success: true, captchaBase64, cookieStr, captchaToken });
+      } catch(e) {
+        console.log('CauseList captcha error:', e.message);
+        return res.status(500).json({ success: false, error: e.message });
+      }
     }
 
     // ── Step 5: Submit & Get Cause List ─────────────────
