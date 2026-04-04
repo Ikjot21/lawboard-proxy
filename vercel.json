@@ -3,6 +3,7 @@
   "functions": {
     "api/captcha.js":   { "maxDuration": 15 },
     "api/case.js":      { "maxDuration": 15 },
+    "api/case_search.js": { "maxDuration": 20 },
     "api/causelist.js": { "maxDuration": 20 }
   },
   "headers": [
