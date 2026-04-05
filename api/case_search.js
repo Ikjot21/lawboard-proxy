@@ -188,19 +188,29 @@ function parseDetailHTML(html, cnr) {
 
   result.courtName = $('h2').first().text().trim();
 
-  // Case Details table — rows have multiple th-td pairs alternating
-  $('table.case_details_table tr').each((_, row) => {
-    // Get all th and td elements in order
-    $(row).find('th').each((_, th) => {
-      const label = $(th).text().trim();
-      // next sibling td
-      const val = $(th).next('td').text().replace(/\s+/g, ' ').replace(/&nbsp;/g, '').trim();
+  // Case Details table — parse all th/td in sequence as key-value pairs
+  $('table.case_details_table').each((_, table) => {
+    const allCells = $(table).find('th, td').toArray();
+    for (let i = 0; i < allCells.length; i++) {
+      const el  = allCells[i];
+      const tag = (el.tagName || el.name || '').toLowerCase();
+      if (tag !== 'th') continue;
+      const label = $(el).text().trim();
+      // Find next td (skip other th)
+      let j = i + 1;
+      while (j < allCells.length) {
+        const nextTag = (allCells[j].tagName || allCells[j].name || '').toLowerCase();
+        if (nextTag === 'td') break;
+        j++;
+      }
+      if (j >= allCells.length) continue;
+      const val = $(allCells[j]).text().replace(/\s+/g, ' ').replace(/&nbsp;/g, '').trim();
       if (label.includes('Case Type'))           result.caseType     = val;
       if (label.includes('Filing Number'))        result.filingNumber = val;
       if (label.includes('Filing Date'))          result.filingDate   = val;
       if (label.includes('Registration Number'))  result.regNumber    = val;
       if (label.includes('Registration Date'))    result.regDate      = val;
-    });
+    }
   });
   result.cnrNumber = $('span.text-danger').first().text().trim() || cnr;
 
