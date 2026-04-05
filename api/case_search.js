@@ -2,7 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 const BASE = 'https://services.ecourts.gov.in/ecourtindia_v6';
-const REQUEST_TIMEOUT = 60000;
+const REQUEST_TIMEOUT = 40000;
 
 const H = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
@@ -340,12 +340,21 @@ module.exports = async (req, res) => {
       results,
       total: results.length,
     });
-  } catch (err) {
-    console.error('case_search error:', err.message);
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-    });
+  } } catch (err) {
+      console.error('case_search error:', err.message, '| code:', err.code, '| status:', err.response?.status);
+
+      if (err.code === 'ECONNABORTED') {
+        return res.status(504).json({
+          success: false,
+          error: 'eCourts took too long to respond. Please try again.',
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        error: err.message || 'Unknown server error',
+      });
+    }
   }
 };
 
