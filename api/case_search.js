@@ -191,7 +191,17 @@ module.exports = async (req, res) => {
     const results = parseResults(html);
     return res.status(200).json({ success: true, results, total: results.length });
   } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    if (err.code === 'ECONNABORTED') {
+      return res.status(504).json({
+        success: false,
+        error: 'Search took too long. Please try a narrower search or try again.',
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
   }
 };
 
