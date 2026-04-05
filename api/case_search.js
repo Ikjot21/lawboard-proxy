@@ -160,7 +160,7 @@ module.exports = async (req, res) => {
 
     const requestTimeout =
         searchType === 'caseType'
-            ? (case_status === 'Disposed' ? 45000 : 25000)
+            ? (case_status === 'Disposed' ? 120000 : 25000)
             : 15000;
 
     const resp = await axios.post(
