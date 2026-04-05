@@ -158,8 +158,20 @@ module.exports = async (req, res) => {
       return res.status(400).json({ success: false, error: 'action or searchType required' });
     }
 
-    const resp = await axios.post(`${BASE}/?p=${endpoint}`, params.toString(),
-      { headers: { ...H, 'Cookie': cookieStr || '' }, timeout: 15000 });
+    const requestTimeout =
+        searchType === 'caseType'
+            ? (case_status === 'Disposed' ? 45000 : 25000)
+            : 15000;
+
+    const resp = await axios.post(
+      `${BASE}/?p=${endpoint}`,
+      params.toString(),
+      {
+        headers: { ...H, 'Cookie': cookieStr || '' },
+        timeout: requestTimeout,
+      },
+    );
+
     const raw = resp.data;
     const rawStr = JSON.stringify(raw);
     if (rawStr.toLowerCase().includes('invalid captcha') || rawStr.toLowerCase().includes('wrong captcha') ||
