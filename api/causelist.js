@@ -86,6 +86,23 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, complexes });
     }
 
+    // ── Police Stations ─────────────────────────────────
+    // ── Police Stations ─────────────────────────────────
+        if (action === 'policeStations') {
+          const { court_complex_code } = req.body;
+          const complexCode = (court_complex_code || '').split('@')[0];
+          const params = new URLSearchParams({
+            state_code, dist_code,
+            court_complex_code: complexCode,
+            est_code: '',
+            ajax_req: 'true', app_token: '',
+          });
+          const resp = await axios.post(`${BASE}/?p=casestatus/fillPoliceStation`, params.toString(),
+            { headers: H, timeout: 12000 });
+          const stations = parseSelectOptions(resp.data);
+          return res.status(200).json({ success: true, stations });
+        }
+
     // ── Step 4: Get Courts from Complex ─────────────────
     if (action === 'courts') {
       // complex_code format: "1140011@1,3,4@N"
