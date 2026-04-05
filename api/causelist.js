@@ -86,22 +86,37 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, complexes });
     }
 
+    // ── Case Types ──────────────────────────────────────
+    if (action === 'caseTypes') {
+      const { court_complex_code } = req.body;
+      const complexCode = (court_complex_code || '').split('@')[0];
+      const params = new URLSearchParams({
+        state_code, dist_code,
+        court_complex_code: complexCode,
+        est_code: '',
+        ajax_req: 'true', app_token: '',
+      });
+      const resp = await axios.post(`${BASE}/?p=casestatus/fillCaseType`, params.toString(),
+        { headers: H, timeout: 12000 });
+      const types = parseSelectOptions(resp.data);
+      return res.status(200).json({ success: true, types });
+    }
+
     // ── Police Stations ─────────────────────────────────
-    // ── Police Stations ─────────────────────────────────
-        if (action === 'policeStations') {
-          const { court_complex_code } = req.body;
-          const complexCode = (court_complex_code || '').split('@')[0];
-          const params = new URLSearchParams({
-            state_code, dist_code,
-            court_complex_code: complexCode,
-            est_code: '',
-            ajax_req: 'true', app_token: '',
-          });
-          const resp = await axios.post(`${BASE}/?p=casestatus/fillPoliceStation`, params.toString(),
-            { headers: H, timeout: 12000 });
-          const stations = parseSelectOptions(resp.data);
-          return res.status(200).json({ success: true, stations });
-        }
+    if (action === 'policeStations') {
+      const { court_complex_code } = req.body;
+      const complexCode = (court_complex_code || '').split('@')[0];
+      const params = new URLSearchParams({
+        state_code, dist_code,
+        court_complex_code: complexCode,
+        est_code: '',
+        ajax_req: 'true', app_token: '',
+      });
+      const resp = await axios.post(`${BASE}/?p=casestatus/fillPoliceStation`, params.toString(),
+        { headers: H, timeout: 12000 });
+      const stations = parseSelectOptions(resp.data);
+      return res.status(200).json({ success: true, stations });
+    }
 
     // ── Step 4: Get Courts from Complex ─────────────────
     if (action === 'courts') {
