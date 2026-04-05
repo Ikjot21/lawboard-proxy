@@ -26,15 +26,16 @@ module.exports = async (req, res) => {
 
   const complexCode = (court_complex_code || '').split('@')[0];
 
-  // ── display_pdf — fetch PDF URL ────────────────────────────────────────────
+  // ── display_pdf — fetch PDF bytes via proxy (session required) ─────────────
   if (action === 'display_pdf') {
     try {
+      // Step 1: Get PDF path
       const params = new URLSearchParams({
-        normal_v:   normal_v  || '',
-        case_val:   case_val  || '',
+        normal_v:   normal_v   || '',
+        case_val:   case_val   || '',
         court_code: court_code || '',
-        filename:   filename  || '',
-        appFlag:    appFlag   || '',
+        filename:   filename   || '',
+        appFlag:    appFlag    || '',
         ajax_req:   'true',
         app_token:  '',
       });
@@ -43,9 +44,17 @@ module.exports = async (req, res) => {
       const raw = resp.data;
       const orderPath = typeof raw === 'object' ? raw.order : null;
       if (!orderPath)
-        return res.status(200).json({ success: false, error: 'PDF URL not found' });
+        return res.status(200).json({ success: false, error: 'PDF path not found' });
+
+      // Step 2: Fetch PDF bytes with same session cookie
       const pdfUrl = `${BASE}/${orderPath.replace(/^\//, '')}`;
-      return res.status(200).json({ success: true, pdfUrl });
+      const pdfResp = await axios.get(pdfUrl, {
+        headers: { ...H, 'Cookie': cookieStr || '' },
+        responseType: 'arraybuffer',
+        timeout: 20000,
+      });
+      const pdfBase64 = Buffer.from(pdfResp.data).toString('base64');
+      return res.status(200).json({ success: true, pdfBase64, pdfUrl });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
