@@ -80,10 +80,6 @@ module.exports = async (req, res) => {
         { headers: { ...H, 'Cookie': cookieStr || '' }, timeout: 15000 });
       const raw  = resp.data;
       const html = typeof raw === 'object' ? (raw.data_list || '') : raw;
-      console.log('----- viewHistory debug start -----');
-      console.log('viewHistory raw type:', typeof raw);
-      console.log('viewHistory html length:', html ? html.length : 0);
-      console.log('viewHistory html preview:', (html || '').slice(0, 1500));
       if (!html || html.length < 20)
         return res.status(200).json({ success: false, error: 'Case detail not found' });
       const detail = parseDetailHTML(html, cino);
@@ -121,6 +117,28 @@ module.exports = async (req, res) => {
         court_complex_code: complexCode, est_code: est_code || 'null',
         ajax_req: 'true', app_token: '',
       });
+    } else if (searchType === 'fir') {
+      // FIR Number search
+      const { fir_no, firyear, fir_captcha_code, police_st_code } = req.body;
+      if (!fir_no) return res.status(400).json({ success: false, error: 'FIR number required' });
+      if (!firyear) return res.status(400).json({ success: false, error: 'FIR year required' });
+      if (!police_st_code) return res.status(400).json({ success: false, error: 'Police station required' });
+      // police_st_code format: "5008-13238065" → police_st_code=5008, uniform_code=13238065
+      const parts = police_st_code.split('-');
+      const ps_code = parts[0] || '';
+      const uniform_code = parts[1] || '0';
+      endpoint = 'casestatus/submitFirNo';
+      params = new URLSearchParams({
+        police_st_code: police_st_code,
+        fir_no, firyear,
+        case_status: case_status || 'Both',
+        fir_captcha_code: fir_captcha_code?.trim() || '',
+        police_st_code: ps_code,
+        uniform_code,
+        state_code: state_code || '', dist_code: dist_code || '',
+        court_complex_code: complexCode, est_code: est_code || 'null',
+        ajax_req: 'true', app_token: '',
+      });
     } else {
       return res.status(400).json({ success: false, error: 'action or searchType required' });
     }
@@ -135,7 +153,7 @@ module.exports = async (req, res) => {
 
     let html = '';
     if (typeof raw === 'object') {
-      html = raw.adv_data || raw.casetype_list || raw.case_list || raw.html || '';
+      html = raw.adv_data || raw.case_data || raw.casetype_list || raw.case_list || raw.html || '';
       if (!html) for (const v of Object.values(raw))
         if (typeof v === 'string' && v.includes('<table')) { html = v; break; }
     } else { html = raw; }
@@ -199,9 +217,8 @@ function parseDetailHTML(html, cnr) {
       const el  = allCells[i];
       const tag = (el.tagName || el.name || '').toLowerCase();
       if (tag !== 'th') continue;
-
-      const label = $(el).text().replace(/\s+/g, ' ').trim();
-
+      const label = $(el).text().trim();
+      // Find next td (skip other th)
       let j = i + 1;
       while (j < allCells.length) {
         const nextTag = (allCells[j].tagName || allCells[j].name || '').toLowerCase();
@@ -209,48 +226,13 @@ function parseDetailHTML(html, cnr) {
         j++;
       }
       if (j >= allCells.length) continue;
-
       const val = $(allCells[j]).text().replace(/\s+/g, ' ').replace(/&nbsp;/g, '').trim();
-
-      console.log('[case_details_table] label =', label, '| value =', val);
-
-      const cleanLabel = label.toLowerCase();
-
-      if (cleanLabel.includes('case type')) {
-        result.caseType = val;
-      }
-      if (cleanLabel.includes('filing number') || cleanLabel.includes('filing no')) {
-        result.filingNumber = val;
-      }
-      if (
-        cleanLabel.includes('filing date') ||
-        cleanLabel.includes('filing dt') ||
-        cleanLabel.includes('date of filing')
-      ) {
-        result.filingDate = val;
-      }
-      if (
-        cleanLabel.includes('registration number') ||
-        cleanLabel.includes('registration no')
-      ) {
-        result.regNumber = val;
-      }
-      if (
-        cleanLabel.includes('registration date') ||
-        cleanLabel.includes('registration dt') ||
-        cleanLabel.includes('date of registration')
-      ) {
-        result.regDate = val;
-      }
+      if (label.includes('Case Type'))           result.caseType     = val;
+      if (label.includes('Filing Number'))        result.filingNumber = val;
+      if (label.includes('Filing Date'))          result.filingDate   = val;
+      if (label.includes('Registration Number'))  result.regNumber    = val;
+      if (label.includes('Registration Date'))    result.regDate      = val;
     }
-  });
-
-  console.log('parsed detail result:', {
-    caseType: result.caseType,
-    filingNumber: result.filingNumber,
-    filingDate: result.filingDate,
-    regNumber: result.regNumber,
-    regDate: result.regDate,
   });
   result.cnrNumber = $('span.text-danger').first().text().trim() || cnr;
 
