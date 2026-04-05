@@ -122,15 +122,14 @@ module.exports = async (req, res) => {
       if (!case_type_1) return res.status(400).json({ success: false, error: 'Case type required' });
       if (!search_year) return res.status(400).json({ success: false, error: 'Year required' });
       endpoint = 'casestatus/submit_case_type';
-      // case_type_1 comes as "25^4" — URLSearchParams will encode ^ to %5E which is correct
-      const ct1 = decodeURIComponent(case_type_1); // handle if already encoded
+      const ct1 = decodeURIComponent(case_type_1);
       params = new URLSearchParams({
         case_type_1: ct1,
         search_year,
         case_status: case_status || 'Both',
         ct_captcha_code: ct_captcha_code?.trim() || '',
         state_code: state_code || '', dist_code: dist_code || '',
-        court_complex_code: complexCode, est_code: est_code || '',
+        court_complex_code: complexCode, est_code: '0',
         ajax_req: 'true', app_token: '',
       });
     } else if (searchType === 'fir') {
