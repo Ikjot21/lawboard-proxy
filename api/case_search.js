@@ -132,6 +132,23 @@ module.exports = async (req, res) => {
         court_complex_code: complexCode, est_code: '0',
         ajax_req: 'true', app_token: '',
       });
+    } else if (searchType === 'caseNo') {
+      const { case_type, search_case_no, rgyear, case_captcha_code } = req.body;
+      if (!case_type) return res.status(400).json({ success: false, error: 'Case type required' });
+      if (!search_case_no) return res.status(400).json({ success: false, error: 'Case number required' });
+      if (!rgyear) return res.status(400).json({ success: false, error: 'Year required' });
+      endpoint = 'casestatus/submitCaseNo';
+      const ct = decodeURIComponent(case_type);
+      params = new URLSearchParams({
+        case_type: ct,
+        search_case_no,
+        rgyear,
+        case_captcha_code: case_captcha_code?.trim() || '',
+        state_code: state_code || '', dist_code: dist_code || '',
+        court_complex_code: complexCode, est_code: '0',
+        case_no: search_case_no,
+        ajax_req: 'true', app_token: '',
+      });
     } else if (searchType === 'fir') {
       // FIR Number search
       const { fir_no, firyear, fir_captcha_code, police_st_code } = req.body;
