@@ -132,21 +132,18 @@ module.exports = async (req, res) => {
         court_complex_code: complexCode, est_code: '0',
         ajax_req: 'true', app_token: '',
       });
-    } else if (searchType === 'caseNo') {
-      const { case_type, search_case_no, rgyear, case_captcha_code } = req.body;
-      if (!case_type) return res.status(400).json({ success: false, error: 'Case type required' });
-      if (!search_case_no) return res.status(400).json({ success: false, error: 'Case number required' });
-      if (!rgyear) return res.status(400).json({ success: false, error: 'Year required' });
-      endpoint = 'casestatus/submitCaseNo';
-      const ct = decodeURIComponent(case_type);
+    } else if (searchType === 'filingNo') {
+      const { filing_no, filyear, file_captcha_code } = req.body;
+      if (!filing_no) return res.status(400).json({ success: false, error: 'Filing number required' });
+      if (!filyear) return res.status(400).json({ success: false, error: 'Year required' });
+      endpoint = 'casestatus/submitFillingNo';
       params = new URLSearchParams({
-        case_type: ct,
-        search_case_no,
-        rgyear,
-        case_captcha_code: case_captcha_code?.trim() || '',
+        case_type: '',
+        filing_no,
+        filyear,
+        file_captcha_code: file_captcha_code?.trim() || '',
         state_code: state_code || '', dist_code: dist_code || '',
         court_complex_code: complexCode, est_code: '0',
-        case_no: search_case_no,
         ajax_req: 'true', app_token: '',
       });
     } else if (searchType === 'fir') {
@@ -197,7 +194,7 @@ module.exports = async (req, res) => {
 
     let html = '';
     if (typeof raw === 'object') {
-      html = raw.adv_data || raw.case_data || raw.casetype_list || raw.case_list || raw.html || '';
+      html = raw.adv_data || raw.case_data || raw.filing_data || raw.filing_data || raw.casetype_list || raw.case_list || raw.html || '';
       if (!html) for (const v of Object.values(raw))
         if (typeof v === 'string' && v.includes('<table')) { html = v; break; }
     } else { html = raw; }
