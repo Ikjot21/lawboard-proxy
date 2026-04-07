@@ -359,9 +359,38 @@ function parseCauseListHTML(html) {
     }
 
     const parties = $(cells[2]).text().replace(/\s+/g, ' ').trim();
-    const advocate = cells.length >= 4
-      ? $(cells[3]).text().replace(/\s+/g, ' ').trim()
+
+    // Advocate column — eCourts puts both pet + resp advocates here
+    // Format: "PET_ADV_NAME RESP_ADV_NAME" or sometimes separated by newline/br
+    const advRaw = cells.length >= 4
+      ? $(cells[3]).html() || ''
       : '';
+
+    // Split by <br> first, then by 2+ spaces
+    const advLines = advRaw
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean);
+
+    let petAdvocate = '', respAdvocate = '', advocate = '';
+    if (advLines.length >= 2) {
+      petAdvocate  = advLines[0].trim();
+      respAdvocate = advLines[1].trim();
+      advocate = petAdvocate;
+    } else if (advLines.length === 1) {
+      // Single line — try splitting by 3+ spaces (two names concatenated)
+      const parts = advLines[0].split(/\s{3,}/);
+      if (parts.length >= 2) {
+        petAdvocate  = parts[0].trim();
+        respAdvocate = parts[1].trim();
+      } else {
+        petAdvocate = advLines[0].trim();
+      }
+      advocate = petAdvocate;
+    }
 
     cases.push({
       srNo,
@@ -371,6 +400,8 @@ function parseCauseListHTML(html) {
       courtCode,
       parties,
       advocate,
+      petAdvocate,
+      respAdvocate,
       stage: currentStage,
     });
   });
