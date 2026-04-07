@@ -168,69 +168,6 @@ module.exports = async (req, res) => {
         court_complex_code: complexCode, est_code: est_code || 'null',
         ajax_req: 'true', app_token: '',
       });
-    } else if (searchType === 'caseNo') {
-      const { case_type, search_case_no, rgyear, case_captcha_code } = req.body;
-      if (!case_type)        return res.status(400).json({ success: false, error: 'Case type required' });
-      if (!search_case_no)   return res.status(400).json({ success: false, error: 'Case number required' });
-      if (!rgyear)           return res.status(400).json({ success: false, error: 'Year required' });
-      endpoint = 'casestatus/submitCaseNo';
-
-      // CRITICAL: case_type contains "BA^4" — the ^ must NOT be URL-encoded.
-      // URLSearchParams encodes ^ to %5E which eCourts rejects.
-      // Build raw string manually to preserve the ^ character.
-      const rawCaseType = decodeURIComponent(case_type); // decode first in case Flutter encoded it
-      const rawBody = [
-        `case_type=${rawCaseType}`,
-        `search_case_no=${encodeURIComponent(search_case_no.trim())}`,
-        `rgyear=${encodeURIComponent(rgyear.trim())}`,
-        `case_captcha_code=${encodeURIComponent(case_captcha_code?.trim() || '')}`,
-        `state_code=${encodeURIComponent(state_code || '')}`,
-        `dist_code=${encodeURIComponent(dist_code || '')}`,
-        `court_complex_code=${encodeURIComponent(complexCode)}`,
-        `est_code=0`,
-        `ajax_req=true`,
-        `app_token=`,
-      ].join('&');
-
-      console.log('[caseNo] rawCaseType:', rawCaseType);
-      console.log('[caseNo] rawBody:', rawBody);
-
-      // Send directly — bypass params/URLSearchParams
-      try {
-        const ecResp = await axios.post(
-          `${BASE}/?p=${endpoint}`,
-          rawBody,
-          {
-            headers: { ...H, 'Cookie': cookieStr || '' },
-            timeout: 15000,
-          }
-        );
-        const raw = ecResp.data;
-        const rawStr = JSON.stringify(raw);
-        console.log('[caseNo] raw keys:', typeof raw === 'object' ? Object.keys(raw) : 'string');
-        console.log('[caseNo] raw preview:', rawStr.substring(0, 400));
-
-        if (rawStr.toLowerCase().includes('invalid captcha') || rawStr.toLowerCase().includes('wrong captcha'))
-          return res.status(200).json({ success: false, error: 'Incorrect CAPTCHA — please try again' });
-
-        let html = '';
-        if (typeof raw === 'object') {
-          html = raw.case_data || raw.adv_data || raw.casetype_list || raw.filing_data || raw.data || raw.html || '';
-          if (!html) for (const v of Object.values(raw))
-            if (typeof v === 'string' && v.includes('<table')) { html = v; break; }
-        } else { html = raw; }
-
-        if (!html || html.trim().length < 20) {
-          console.log('[caseNo] no html found, raw:', rawStr.substring(0, 300));
-          return res.status(200).json({ success: false, error: 'No cases found', debug: typeof raw === 'object' ? Object.keys(raw) : 'string' });
-        }
-
-        const results = parseResults(html);
-        return res.status(200).json({ success: true, results, total: results.length });
-      } catch (err) {
-        console.error('[caseNo] error:', err.message);
-        return res.status(500).json({ success: false, error: err.message });
-      }
     } else {
       return res.status(400).json({ success: false, error: 'action or searchType required' });
     }
@@ -251,57 +188,19 @@ module.exports = async (req, res) => {
 
     const raw = resp.data;
     const rawStr = JSON.stringify(raw);
-
-    // Log raw keys for debugging
-    if (typeof raw === 'object') {
-      console.log('[parse] raw keys:', Object.keys(raw));
-      console.log('[parse] raw preview:', rawStr.substring(0, 500));
-    }
-
     if (rawStr.toLowerCase().includes('invalid captcha') || rawStr.toLowerCase().includes('wrong captcha') ||
         (typeof raw === 'object' && raw.status === 0))
       return res.status(200).json({ success: false, error: 'Incorrect CAPTCHA — please try again' });
 
     let html = '';
     if (typeof raw === 'object') {
-      // eCourts uses different keys for different search types:
-      // advocate → adv_data
-      // party    → casetype_list (yes, confusing naming)
-      // caseNo   → case_data  OR  casetype_list  OR  data
-      // caseType → casetype_list
-      // filingNo → filing_data
-      // fir      → fir_data or casetype_list
-      html = raw.case_data
-          || raw.adv_data
-          || raw.casetype_list
-          || raw.filing_data
-          || raw.fir_data
-          || raw.data
-          || raw.case_list
-          || raw.html
-          || '';
-      // Last resort: find any string value containing a <table
-      if (!html) {
-        for (const v of Object.values(raw)) {
-          if (typeof v === 'string' && v.includes('<table')) { html = v; break; }
-        }
-      }
-      // If still empty, check if it's an array directly
-      if (!html && Array.isArray(raw)) {
-        return res.status(200).json({ success: true, results: raw, total: raw.length });
-      }
-    } else {
-      html = raw;
-    }
+      html = raw.adv_data || raw.case_data || raw.filing_data || raw.filing_data || raw.casetype_list || raw.case_list || raw.html || '';
+      if (!html) for (const v of Object.values(raw))
+        if (typeof v === 'string' && v.includes('<table')) { html = v; break; }
+    } else { html = raw; }
 
-    if (!html || html.trim().length < 20) {
-      console.log('[parse] No HTML found. Raw:', rawStr.substring(0, 300));
-      return res.status(200).json({
-        success: false,
-        error: 'No cases found',
-        debug: typeof raw === 'object' ? Object.keys(raw) : 'string response',
-      });
-    }
+    if (!html || html.trim().length < 20)
+      return res.status(200).json({ success: false, error: 'No cases found' });
 
     const results = parseResults(html);
     return res.status(200).json({ success: true, results, total: results.length });
@@ -400,75 +299,31 @@ function parseDetailHTML(html, cnr) {
     if (label.includes('Court Number'))       result.courtNo      = val;
   });
 
-  // ── Helper: parse party+advocate from any li element ──
-  function parsePartyLi(liEl) {
-    const raw = $(liEl).html() || '';
-    const lines = raw
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .split('\n')
-      .map(l => l.trim())
-      .filter(Boolean);
-    let name = '', adv = '';
-    lines.forEach(line => {
-      if (/^\d+\)/.test(line))
-        name = line.replace(/^\d+\)\s*/, '').replace(/\s*Advocate[-:].*/i, '').trim();
-      if (/Advocate[-:]/i.test(line))
-        adv = line.replace(/.*Advocate[-:]\s*/i, '').trim();
-    });
-    return { name, adv };
-  }
-
-  // Petitioners — try all possible class names eCourts uses
+  // Petitioners
   const pets = [], petAdvs = [];
-  const petSels = ['ul.petitioner-advocate-list li','ul.Petitioner_Advocate_table li','ul.pet_advocate_table li'];
-  let petSel = petSels.find(s => $(s).length > 0) || '';
-  if (petSel) {
-    $(petSel).each((_, li) => {
-      const { name, adv } = parsePartyLi(li);
-      if (name) pets.push(name);
-      if (adv)  petAdvs.push(adv);
+  $('ul.petitioner-advocate-list li, ul.Petitioner_Advocate_table li').each((_, li) => {
+    const lines = $(li).html().replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ').split('\n').map(l => l.trim()).filter(Boolean);
+    lines.forEach(line => {
+      if (/^\d+\)/.test(line)) pets.push(line.replace(/^\d+\)\s*/, '').replace(/\s*Advocate[-:].*/i, '').trim());
+      if (/Advocate[-:]/i.test(line)) petAdvs.push(line.replace(/.*Advocate[-:]\s*/i, '').trim());
     });
-  }
+  });
   result.petitioner  = pets.join(', ');
   result.petAdvocate = petAdvs.join(', ');
 
-  // Respondents — try ALL possible class names eCourts uses
+  // Respondents
   const resps = [], respAdvs = [];
-  const respSels = [
-    'ul.respondent-advocate-list li',
-    'ul.Respondent_Advocate_table li',
-    'ul.res_advocate_table li',
-    'ul.respondentAdvocateTable li',
-    'ul.resp_advocate_table li',
-  ];
-  let respSel = respSels.find(s => $(s).length > 0) || '';
-  if (respSel) {
-    $(respSel).each((_, li) => {
-      const { name, adv } = parsePartyLi(li);
-      if (name) resps.push(name);
-      if (adv)  respAdvs.push(adv);
+  $('ul.respondent-advocate-list li, ul.Respondent_Advocate_table li').each((_, li) => {
+    const lines = $(li).html().replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ').split('\n').map(l => l.trim()).filter(Boolean);
+    lines.forEach(line => {
+      if (/^\d+\)/.test(line)) resps.push(line.replace(/^\d+\)\s*/, '').replace(/\s*Advocate[-:].*/i, '').trim());
+      if (/Advocate[-:]/i.test(line)) respAdvs.push(line.replace(/.*Advocate[-:]\s*/i, '').trim());
     });
-  }
-  // Fallback: scan ALL ul lists — skip the one used for petitioner
-  if (resps.length === 0) {
-    $('ul').each((_, ul) => {
-      if (petSel && $(ul).is($(petSel).closest('ul'))) return;
-      const firstLi = $(ul).find('li').first().text().trim();
-      if (/^\d+\)/.test(firstLi) && !pets.some(p => firstLi.includes(p))) {
-        $(ul).find('li').each((_, li) => {
-          const { name, adv } = parsePartyLi(li);
-          if (name) resps.push(name);
-          if (adv)  respAdvs.push(adv);
-        });
-        return false;
-      }
-    });
-  }
+  });
   result.respondent   = resps.join(', ');
   result.respAdvocate = respAdvs.join(', ');
-  console.log('[parseDetail] petAdv:', result.petAdvocate, '| respAdv:', result.respAdvocate);
   result.partyName    = [result.petitioner, result.respondent].filter(Boolean).join(' vs ');
 
   // Acts
