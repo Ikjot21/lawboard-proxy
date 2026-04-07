@@ -418,12 +418,16 @@ function parseDetailHTML(html, cnr) {
       $(row).find('td').last().find('strong').text().trim() ||
       $(row).find('td').last().text().replace(/\s+/g, ' ').trim();
 
-    if (label.includes('First Hearing'))       result.firstHearingDate = val;
+    if (label.includes('First Hearing'))       result.firstDate = val;
+    if (label.includes('Next Hearing'))        result.nextDate = val;
     if (label.includes('Decision Date'))       result.decisionDate = val;
-    if (label.includes('Case Status'))         result.caseStatusFull = val;
+    if (label.includes('Case Status'))         result.caseStatus = val;
+    if (label.includes('Case Stage'))          result.caseStage = val;
     if (label.includes('Nature of Disposal'))  result.disposal = val;
     if (label.includes('Court Number'))        result.courtNo = val;
     if (label.includes('Judge'))               result.judgeName = val;
+    if (label.includes('e-Filing Number'))     result.eFilingNumber = val;
+    if (label.includes('e-Filing Date'))       result.eFilingDate = val;
   });
 
   // ── Helper: parse party+advocate from any li element ──
