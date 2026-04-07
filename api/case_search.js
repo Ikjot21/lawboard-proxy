@@ -182,12 +182,14 @@ module.exports = async (req, res) => {
       const rawBody = [
         `case_type=${rawCaseType}`,
         `search_case_no=${encodeURIComponent(search_case_no.trim())}`,
+        `case_no=${encodeURIComponent(search_case_no.trim())}`,
         `rgyear=${encodeURIComponent(rgyear.trim())}`,
         `case_captcha_code=${encodeURIComponent(case_captcha_code?.trim() || '')}`,
         `state_code=${encodeURIComponent(state_code || '')}`,
         `dist_code=${encodeURIComponent(dist_code || '')}`,
         `court_complex_code=${encodeURIComponent(complexCode)}`,
-        `est_code=0`,
+        `est_code=null`,
+        `case_type=${rawCaseType}`,
         `ajax_req=true`,
         `app_token=`,
       ].join('&');
