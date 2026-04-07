@@ -299,31 +299,75 @@ function parseDetailHTML(html, cnr) {
     if (label.includes('Court Number'))       result.courtNo      = val;
   });
 
-  // Petitioners
-  const pets = [], petAdvs = [];
-  $('ul.petitioner-advocate-list li, ul.Petitioner_Advocate_table li').each((_, li) => {
-    const lines = $(li).html().replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ').split('\n').map(l => l.trim()).filter(Boolean);
+  // ── Helper: parse party+advocate from any li element ──
+  function parsePartyLi(liEl) {
+    const raw = $(liEl).html() || '';
+    const lines = raw
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean);
+    let name = '', adv = '';
     lines.forEach(line => {
-      if (/^\d+\)/.test(line)) pets.push(line.replace(/^\d+\)\s*/, '').replace(/\s*Advocate[-:].*/i, '').trim());
-      if (/Advocate[-:]/i.test(line)) petAdvs.push(line.replace(/.*Advocate[-:]\s*/i, '').trim());
+      if (/^\d+\)/.test(line))
+        name = line.replace(/^\d+\)\s*/, '').replace(/\s*Advocate[-:].*/i, '').trim();
+      if (/Advocate[-:]/i.test(line))
+        adv = line.replace(/.*Advocate[-:]\s*/i, '').trim();
     });
-  });
+    return { name, adv };
+  }
+
+  // Petitioners — try all possible class names eCourts uses
+  const pets = [], petAdvs = [];
+  const petSels = ['ul.petitioner-advocate-list li','ul.Petitioner_Advocate_table li','ul.pet_advocate_table li'];
+  let petSel = petSels.find(s => $(s).length > 0) || '';
+  if (petSel) {
+    $(petSel).each((_, li) => {
+      const { name, adv } = parsePartyLi(li);
+      if (name) pets.push(name);
+      if (adv)  petAdvs.push(adv);
+    });
+  }
   result.petitioner  = pets.join(', ');
   result.petAdvocate = petAdvs.join(', ');
 
-  // Respondents
+  // Respondents — try ALL possible class names eCourts uses
   const resps = [], respAdvs = [];
-  $('ul.respondent-advocate-list li, ul.Respondent_Advocate_table li').each((_, li) => {
-    const lines = $(li).html().replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ').split('\n').map(l => l.trim()).filter(Boolean);
-    lines.forEach(line => {
-      if (/^\d+\)/.test(line)) resps.push(line.replace(/^\d+\)\s*/, '').replace(/\s*Advocate[-:].*/i, '').trim());
-      if (/Advocate[-:]/i.test(line)) respAdvs.push(line.replace(/.*Advocate[-:]\s*/i, '').trim());
+  const respSels = [
+    'ul.respondent-advocate-list li',
+    'ul.Respondent_Advocate_table li',
+    'ul.res_advocate_table li',
+    'ul.respondentAdvocateTable li',
+    'ul.resp_advocate_table li',
+  ];
+  let respSel = respSels.find(s => $(s).length > 0) || '';
+  if (respSel) {
+    $(respSel).each((_, li) => {
+      const { name, adv } = parsePartyLi(li);
+      if (name) resps.push(name);
+      if (adv)  respAdvs.push(adv);
     });
-  });
+  }
+  // Fallback: scan ALL ul lists — skip the one used for petitioner
+  if (resps.length === 0) {
+    $('ul').each((_, ul) => {
+      if (petSel && $(ul).is($(petSel).closest('ul'))) return;
+      const firstLi = $(ul).find('li').first().text().trim();
+      if (/^\d+\)/.test(firstLi) && !pets.some(p => firstLi.includes(p))) {
+        $(ul).find('li').each((_, li) => {
+          const { name, adv } = parsePartyLi(li);
+          if (name) resps.push(name);
+          if (adv)  respAdvs.push(adv);
+        });
+        return false;
+      }
+    });
+  }
   result.respondent   = resps.join(', ');
   result.respAdvocate = respAdvs.join(', ');
+  console.log('[parseDetail] petAdv:', result.petAdvocate, '| respAdv:', result.respAdvocate);
   result.partyName    = [result.petitioner, result.respondent].filter(Boolean).join(' vs ');
 
   // Acts
