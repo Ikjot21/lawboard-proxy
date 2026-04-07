@@ -175,8 +175,13 @@ module.exports = async (req, res) => {
       if (!search_case_no)   return res.status(400).json({ success: false, error: 'Case number required' });
       if (!rgyear)           return res.status(400).json({ success: false, error: 'Year required' });
       endpoint = 'casestatus/submitCaseNo';
+      // NOTE: eCourts uses 'case_captcha_code' for this endpoint
+      // case_type must be decoded e.g. "BA" not "BA%5E4" or "25^4"
+      // The ^ character in case_type separates type code from est_code
+      const caseTypeParts = decodeURIComponent(case_type).split('^');
+      const caseTypeOnly = caseTypeParts[0]; // e.g. "BA"
       params = new URLSearchParams({
-        case_type:          decodeURIComponent(case_type),
+        case_type:          decodeURIComponent(case_type), // send full e.g. "BA^4"
         search_case_no:     search_case_no.trim(),
         rgyear:             rgyear.trim(),
         case_captcha_code:  case_captcha_code?.trim() || '',
@@ -187,6 +192,8 @@ module.exports = async (req, res) => {
         ajax_req:           'true',
         app_token:          '',
       });
+      console.log('[caseNo] case_type raw:', case_type, '→ decoded:', decodeURIComponent(case_type));
+      console.log('[caseNo] params:', params.toString());
     } else {
       return res.status(400).json({ success: false, error: 'action or searchType required' });
     }
@@ -207,19 +214,57 @@ module.exports = async (req, res) => {
 
     const raw = resp.data;
     const rawStr = JSON.stringify(raw);
+
+    // Log raw keys for debugging
+    if (typeof raw === 'object') {
+      console.log('[parse] raw keys:', Object.keys(raw));
+      console.log('[parse] raw preview:', rawStr.substring(0, 500));
+    }
+
     if (rawStr.toLowerCase().includes('invalid captcha') || rawStr.toLowerCase().includes('wrong captcha') ||
         (typeof raw === 'object' && raw.status === 0))
       return res.status(200).json({ success: false, error: 'Incorrect CAPTCHA — please try again' });
 
     let html = '';
     if (typeof raw === 'object') {
-      html = raw.adv_data || raw.case_data || raw.filing_data || raw.filing_data || raw.casetype_list || raw.case_list || raw.html || '';
-      if (!html) for (const v of Object.values(raw))
-        if (typeof v === 'string' && v.includes('<table')) { html = v; break; }
-    } else { html = raw; }
+      // eCourts uses different keys for different search types:
+      // advocate → adv_data
+      // party    → casetype_list (yes, confusing naming)
+      // caseNo   → case_data  OR  casetype_list  OR  data
+      // caseType → casetype_list
+      // filingNo → filing_data
+      // fir      → fir_data or casetype_list
+      html = raw.case_data
+          || raw.adv_data
+          || raw.casetype_list
+          || raw.filing_data
+          || raw.fir_data
+          || raw.data
+          || raw.case_list
+          || raw.html
+          || '';
+      // Last resort: find any string value containing a <table
+      if (!html) {
+        for (const v of Object.values(raw)) {
+          if (typeof v === 'string' && v.includes('<table')) { html = v; break; }
+        }
+      }
+      // If still empty, check if it's an array directly
+      if (!html && Array.isArray(raw)) {
+        return res.status(200).json({ success: true, results: raw, total: raw.length });
+      }
+    } else {
+      html = raw;
+    }
 
-    if (!html || html.trim().length < 20)
-      return res.status(200).json({ success: false, error: 'No cases found' });
+    if (!html || html.trim().length < 20) {
+      console.log('[parse] No HTML found. Raw:', rawStr.substring(0, 300));
+      return res.status(200).json({
+        success: false,
+        error: 'No cases found',
+        debug: typeof raw === 'object' ? Object.keys(raw) : 'string response',
+      });
+    }
 
     const results = parseResults(html);
     return res.status(200).json({ success: true, results, total: results.length });
