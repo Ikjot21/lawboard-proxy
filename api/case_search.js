@@ -368,49 +368,118 @@ function parseResults(html) {
 }
 
 // ── Parse viewHistory detail HTML ──────────────────────────────────────────────
-function parseDetailHTML(html, cnr) {
+function parseDetailHTML(html, cino) {
   const $ = cheerio.load(html);
-  const result = { cnr: cnr || '' };
 
-  result.courtName = $('h2').first().text().trim();
+  const getText = (label) => {
+    let val = '';
 
-  // Case Details table — parse all th/td in sequence as key-value pairs
-  $('table.case_details_table').each((_, table) => {
-    const allCells = $(table).find('th, td').toArray();
-    for (let i = 0; i < allCells.length; i++) {
-      const el  = allCells[i];
-      const tag = (el.tagName || el.name || '').toLowerCase();
-      if (tag !== 'th') continue;
-      const label = $(el).text().trim();
-      // Find next td (skip other th)
-      let j = i + 1;
-      while (j < allCells.length) {
-        const nextTag = (allCells[j].tagName || allCells[j].name || '').toLowerCase();
-        if (nextTag === 'td') break;
-        j++;
+    $('tr').each((_, row) => {
+      const cells = $(row).find('td, th');
+
+      if (cells.length >= 2) {
+        const key = $(cells[0]).text().replace(/\s+/g, ' ').trim();
+
+        if (key.toLowerCase().includes(label.toLowerCase())) {
+          val = $(cells[1]).text().replace(/\s+/g, ' ').trim();
+        }
       }
-      if (j >= allCells.length) continue;
-      const val = $(allCells[j]).text().replace(/\s+/g, ' ').replace(/&nbsp;/g, '').trim();
-      if (label.includes('Case Type'))           result.caseType     = val;
-      if (label.includes('Filing Number'))        result.filingNumber = val;
-      if (label.includes('Filing Date'))          result.filingDate   = val;
-      if (label.includes('Registration Number'))  result.regNumber    = val;
-      if (label.includes('Registration Date'))    result.regDate      = val;
+    });
+
+    return val;
+  };
+
+  const detail = {
+    cnr: cino || '',
+    caseType: getText('Case Type'),
+    filingNumber: getText('Filing Number'),
+    filingDate: getText('Filing Date'),
+    regNumber: getText('Registration Number'),
+    regDate: getText('Registration Date'),
+
+    firstHearingDate: getText('First Hearing Date'),
+    decisionDate: getText('Decision Date'),
+    caseStatus: getText('Case Status'),
+    disposal: getText('Nature of Disposal'),
+
+    courtJudge: getText('Court Number and Judge'),
+
+    petitioner: '',
+    petitionerAdv: '',
+    respondent: '',
+    respondentAdv: '',
+
+    acts: [],
+    firDetails: {},
+    history: [],
+    orders: [],
+  };
+
+  // ── Parties ─────────────────────────────
+  const petBlock = $('td:contains("Petitioner and Advocate")').parent().next();
+  if (petBlock.length) {
+    const txt = petBlock.text().trim();
+    const parts = txt.split('Advocate-');
+    detail.petitioner = parts[0]?.trim() || '';
+    detail.petitionerAdv = parts[1]?.trim() || '';
+  }
+
+  const resBlock = $('td:contains("Respondent and Advocate")').parent().next();
+  if (resBlock.length) {
+    const txt = resBlock.text().trim();
+    const parts = txt.split('Advocate-');
+    detail.respondent = parts[0]?.trim() || '';
+    detail.respondentAdv = parts[1]?.trim() || '';
+  }
+
+  // ── Acts ─────────────────────────────
+  $('table:contains("Under Act") tr').each((_, row) => {
+    const tds = $(row).find('td');
+    if (tds.length >= 2) {
+      detail.acts.push({
+        act: $(tds[0]).text().trim(),
+        section: $(tds[1]).text().trim(),
+      });
     }
   });
-  result.cnrNumber = $('span.text-danger').first().text().trim() || cnr;
 
-  // Case Status table
-  $('table.case_status_table tr').each((_, row) => {
-    const label = $(row).find('th, td').first().text().trim();
-    const val   = $(row).find('td').last().find('strong').text().trim() ||
-                  $(row).find('td').last().text().trim();
-    if (label.includes('First Hearing'))      result.firstDate    = val;
-    if (label.includes('Decision Date'))      result.decisionDate = val;
-    if (label.includes('Case Status'))        result.caseStatus   = val;
-    if (label.includes('Nature of Disposal')) result.disposal     = val;
-    if (label.includes('Court Number'))       result.courtNo      = val;
+  // ── FIR ─────────────────────────────
+  $('table:contains("Police Station") tr').each((_, row) => {
+    const tds = $(row).find('td');
+    if (tds.length === 2) {
+      const key = $(tds[0]).text().trim();
+      const val = $(tds[1]).text().trim();
+      detail.firDetails[key] = val;
+    }
   });
+
+  // ── Case History ─────────────────────
+  $('table:contains("Business on Date") tr').each((_, row) => {
+    const tds = $(row).find('td');
+    if (tds.length >= 4) {
+      detail.history.push({
+        judge: $(tds[0]).text().trim(),
+        businessDate: $(tds[1]).text().trim(),
+        hearingDate: $(tds[2]).text().trim(),
+        purpose: $(tds[3]).text().trim(),
+      });
+    }
+  });
+
+  // ── Orders ───────────────────────────
+  $('table:contains("Order Number") tr').each((_, row) => {
+    const tds = $(row).find('td');
+    if (tds.length >= 3) {
+      detail.orders.push({
+        orderNo: $(tds[0]).text().trim(),
+        date: $(tds[1]).text().trim(),
+        details: $(tds[2]).text().trim(),
+      });
+    }
+  });
+
+  return detail;
+}
 
   // ── Helper: parse party+advocate from any li element ──
   function parsePartyLi(liEl) {
