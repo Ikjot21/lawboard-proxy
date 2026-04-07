@@ -328,9 +328,13 @@ function parseCauseListHTML(html) {
       const onClick = $(cells[1]).find('a').attr('onclick') || '';
       const cnrMatch = onClick.match(/'([A-Z]{4}\d{16})'/);
       const cnr = cnrMatch ? cnrMatch[1] : '';
+      // viewHistory(case_no, 'CNR', court_code) — extract numeric case_no and court_code
+      const vhMatch = onClick.match(/viewHistory\s*\(\s*(\d+)\s*,\s*'([^']+)'\s*,\s*(\d+)/);
+      const caseNoNum = vhMatch ? vhMatch[1] : '';
+      const courtCode = vhMatch ? vhMatch[3] : '1';
       const parties  = $(cells[2]).text().trim().replace(/\n+/g, ' vs ');
       const advocate = cells.length >= 4 ? $(cells[3]).text().trim().replace(/\n+/g, ', ') : '';
-      cases.push({ srNo, caseNo: caseNoRaw, cnr, parties, advocate, stage: currentStage });
+      cases.push({ srNo, caseNo: caseNoRaw, caseNoNum, cnr, courtCode, parties, advocate, stage: currentStage });
     }
   });
   return cases;
