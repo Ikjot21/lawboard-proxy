@@ -374,38 +374,27 @@ function parseDetailHTML(html, cnr) {
   result.courtName = $('h2').first().text().trim();
 
   // ── Case Details table — parse all th/td in sequence as key-value pairs ──
-  $('table.case_details_table').each((_, table) => {
-    const allCells = $(table).find('th, td').toArray();
+  $('table.case_status_table tr').each((_, row) => {
+    const label = $(row).find('th, td').first().text().replace(/\s+/g, ' ').trim();
+    const val =
+      $(row).find('td').last().find('strong').text().trim() ||
+      $(row).find('td').last().text().replace(/\s+/g, ' ').trim();
 
-    for (let i = 0; i < allCells.length; i++) {
-      const el = allCells[i];
-      const tag = (el.tagName || el.name || '').toLowerCase();
-      if (tag !== 'th') continue;
-
-      const label = $(el).text().replace(/\s+/g, ' ').trim();
-
-      let j = i + 1;
-      while (j < allCells.length) {
-        const nextTag = (allCells[j].tagName || allCells[j].name || '').toLowerCase();
-        if (nextTag === 'td') break;
-        j++;
-      }
-      if (j >= allCells.length) continue;
-
-      const val = $(allCells[j])
-        .text()
-        .replace(/\s+/g, ' ')
-        .replace(/&nbsp;/g, '')
-        .trim();
-
-      if (label.includes('Case Type'))          result.caseType = val;
-      if (label.includes('Filing Number'))      result.filingNumber = val;
-      if (label.includes('Filing Date'))        result.filingDate = val;
-      if (label.includes('Registration Number')) result.regNumber = val;
-      if (label.includes('Registration Date'))  result.regDate = val;
-      if (label.includes('CNR Number'))         result.cnrNumber = val;
-    }
+    if (label.includes('First Hearing'))       result.firstDate = val;
+    if (label.includes('Next Hearing'))        result.nextDate = val;
+    if (label.includes('Decision Date'))       result.decisionDate = val;
+    if (label.includes('Case Status'))         result.caseStatus = val;
+    if (label.includes('Case Stage'))          result.caseStage = val;
+    if (label.includes('Nature of Disposal'))  result.disposal = val;
+    if (label.includes('Court Number'))        result.courtNo = val;
+    if (label.includes('Judge'))               result.judgeName = val;
   });
+  if (!result.firstDate && result.firstHearingDate) {
+    result.firstDate = result.firstHearingDate;
+  }
+  if (!result.caseStatus && result.caseStatusFull) {
+    result.caseStatus = result.caseStatusFull;
+  }
 
   if (!result.cnrNumber) {
     result.cnrNumber = $('span.text-danger').first().text().trim() || cnr || '';
