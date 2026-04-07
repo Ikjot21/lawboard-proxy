@@ -182,14 +182,12 @@ module.exports = async (req, res) => {
       const rawBody = [
         `case_type=${rawCaseType}`,
         `search_case_no=${encodeURIComponent(search_case_no.trim())}`,
-        `case_no=${encodeURIComponent(search_case_no.trim())}`,
         `rgyear=${encodeURIComponent(rgyear.trim())}`,
         `case_captcha_code=${encodeURIComponent(case_captcha_code?.trim() || '')}`,
         `state_code=${encodeURIComponent(state_code || '')}`,
         `dist_code=${encodeURIComponent(dist_code || '')}`,
         `court_complex_code=${encodeURIComponent(complexCode)}`,
-        `est_code=null`,
-        `case_type=${rawCaseType}`,
+        `est_code=0`,
         `ajax_req=true`,
         `app_token=`,
       ].join('&');
@@ -368,138 +366,241 @@ function parseResults(html) {
 }
 
 // ── Parse viewHistory detail HTML ──────────────────────────────────────────────
-function parseDetailHTML(html, cino) {
+function parseDetailHTML(html, cnr) {
   const $ = cheerio.load(html);
+  const result = { cnr: cnr || '' };
 
-  const getText = (label) => {
-    let val = '';
+  // Court name
+  result.courtName = $('h2').first().text().trim();
 
-    $('tr').each((_, row) => {
-      const cells = $(row).find('td, th');
-      if (cells.length >= 2) {
-        const key = $(cells[0]).text().replace(/\s+/g, ' ').trim();
-        if (key.toLowerCase().includes(label.toLowerCase())) {
-          val = $(cells[1]).text().replace(/\s+/g, ' ').trim();
-        }
+  // ── Case Details table — parse all th/td in sequence as key-value pairs ──
+  $('table.case_details_table').each((_, table) => {
+    const allCells = $(table).find('th, td').toArray();
+
+    for (let i = 0; i < allCells.length; i++) {
+      const el = allCells[i];
+      const tag = (el.tagName || el.name || '').toLowerCase();
+      if (tag !== 'th') continue;
+
+      const label = $(el).text().replace(/\s+/g, ' ').trim();
+
+      let j = i + 1;
+      while (j < allCells.length) {
+        const nextTag = (allCells[j].tagName || allCells[j].name || '').toLowerCase();
+        if (nextTag === 'td') break;
+        j++;
+      }
+      if (j >= allCells.length) continue;
+
+      const val = $(allCells[j])
+        .text()
+        .replace(/\s+/g, ' ')
+        .replace(/&nbsp;/g, '')
+        .trim();
+
+      if (label.includes('Case Type'))          result.caseType = val;
+      if (label.includes('Filing Number'))      result.filingNumber = val;
+      if (label.includes('Filing Date'))        result.filingDate = val;
+      if (label.includes('Registration Number')) result.regNumber = val;
+      if (label.includes('Registration Date'))  result.regDate = val;
+      if (label.includes('CNR Number'))         result.cnrNumber = val;
+    }
+  });
+
+  if (!result.cnrNumber) {
+    result.cnrNumber = $('span.text-danger').first().text().trim() || cnr || '';
+  }
+
+  // ── Case Status table ─────────────────────────────────────
+  $('table.case_status_table tr').each((_, row) => {
+    const label = $(row).find('th, td').first().text().replace(/\s+/g, ' ').trim();
+    const val =
+      $(row).find('td').last().find('strong').text().trim() ||
+      $(row).find('td').last().text().replace(/\s+/g, ' ').trim();
+
+    if (label.includes('First Hearing'))       result.firstHearingDate = val;
+    if (label.includes('Decision Date'))       result.decisionDate = val;
+    if (label.includes('Case Status'))         result.caseStatusFull = val;
+    if (label.includes('Nature of Disposal'))  result.disposal = val;
+    if (label.includes('Court Number'))        result.courtNo = val;
+    if (label.includes('Judge'))               result.judgeName = val;
+  });
+
+  // ── Helper: parse party+advocate from any li element ──
+  function parsePartyLi(liEl) {
+    const raw = $(liEl).html() || '';
+    const lines = raw
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean);
+
+    let name = '', adv = '';
+    lines.forEach(line => {
+      if (/^\d+\)/.test(line)) {
+        name = line
+          .replace(/^\d+\)\s*/, '')
+          .replace(/\s*Advocate[-:].*/i, '')
+          .trim();
+      }
+      if (/Advocate[-:]/i.test(line)) {
+        adv = line.replace(/.*Advocate[-:]\s*/i, '').trim();
       }
     });
 
-    return val;
-  };
-
-  const detail = {
-    cnr: cino || '',
-
-    // Case details
-    caseType: getText('Case Type'),
-    filingNumber: getText('Filing Number'),
-    filingDate: getText('Filing Date'),
-    regNumber: getText('Registration Number'),
-    regDate: getText('Registration Date'),
-
-    // Status
-    caseStatusFull: getText('Case Status'),
-    disposal: getText('Nature of Disposal'),
-    firstHearingDate: getText('First Hearing Date'),
-    decisionDate: getText('Decision Date'),
-    courtJudge: getText('Court Number and Judge'),
-
-    // Parties
-    petitioner: '',
-    petitionerAdv: '',
-    respondent: '',
-    respondentAdv: '',
-
-    // Structured sections
-    acts: [],
-    firDetails: {},
-    history: [],
-    orders: [],
-
-    // Helpful combined title
-    partyName: '',
-  };
-
-  // ── Parties ─────────────────────────────
-  const petBlock = $('td:contains("Petitioner and Advocate")').parent().next();
-  if (petBlock.length) {
-    const txt = petBlock.text().trim();
-    const parts = txt.split('Advocate-');
-    detail.petitioner = (parts[0] || '').trim();
-    detail.petitionerAdv = (parts[1] || '').trim();
+    return { name, adv };
   }
 
-  const resBlock = $('td:contains("Respondent and Advocate")').parent().next();
-  if (resBlock.length) {
-    const txt = resBlock.text().trim();
-    const parts = txt.split('Advocate-');
-    detail.respondent = (parts[0] || '').trim();
-    detail.respondentAdv = (parts[1] || '').trim();
+  // ── Petitioners ─────────────────────────────────────────
+  const pets = [], petAdvs = [];
+  const petSels = [
+    'ul.petitioner-advocate-list li',
+    'ul.Petitioner_Advocate_table li',
+    'ul.pet_advocate_table li',
+  ];
+  const petSel = petSels.find(s => $(s).length > 0) || '';
+  if (petSel) {
+    $(petSel).each((_, li) => {
+      const { name, adv } = parsePartyLi(li);
+      if (name) pets.push(name);
+      if (adv) petAdvs.push(adv);
+    });
   }
 
-  detail.partyName = [detail.petitioner, detail.respondent]
-    .filter(Boolean)
-    .join(' vs ');
+  result.petitioner = pets.join(', ');
+  result.petAdvocate = petAdvs.join(', ');
 
-  // ── Acts ─────────────────────────────
-  $('table:contains("Under Act") tr').each((_, row) => {
+  // ── Respondents ────────────────────────────────────────
+  const resps = [], respAdvs = [];
+  const respSels = [
+    'ul.respondent-advocate-list li',
+    'ul.Respondent_Advocate_table li',
+    'ul.res_advocate_table li',
+    'ul.respondentAdvocateTable li',
+    'ul.resp_advocate_table li',
+  ];
+  const respSel = respSels.find(s => $(s).length > 0) || '';
+
+  if (respSel) {
+    $(respSel).each((_, li) => {
+      const { name, adv } = parsePartyLi(li);
+      if (name) resps.push(name);
+      if (adv) respAdvs.push(adv);
+    });
+  }
+
+  if (resps.length === 0) {
+    $('ul').each((_, ul) => {
+      if (petSel && $(ul).is($(petSel).closest('ul'))) return;
+      const firstLi = $(ul).find('li').first().text().trim();
+      if (/^\d+\)/.test(firstLi) && !pets.some(p => firstLi.includes(p))) {
+        $(ul).find('li').each((_, li) => {
+          const { name, adv } = parsePartyLi(li);
+          if (name) resps.push(name);
+          if (adv) respAdvs.push(adv);
+        });
+        return false;
+      }
+    });
+  }
+
+  result.respondent = resps.join(', ');
+  result.respAdvocate = respAdvs.join(', ');
+  result.partyName = [result.petitioner, result.respondent].filter(Boolean).join(' vs ');
+
+  console.log('[parseDetail] petAdv:', result.petAdvocate, '| respAdv:', result.respAdvocate);
+
+  // ── Acts ───────────────────────────────────────────────
+  const acts = [];
+  $('table.acts_table tr, table#act_table tr').each((_, row) => {
     const tds = $(row).find('td');
     if (tds.length >= 2) {
       const act = $(tds[0]).text().trim();
-      const section = $(tds[1]).text().trim();
-      if (act || section) {
-        detail.acts.push({ act, section });
+      const sec = $(tds[1]).text().trim();
+      if (act && sec) acts.push({ act, section: sec });
+    }
+  });
+  result.acts = acts;
+
+  // ── FIR Details ────────────────────────────────────────
+  result.firDetails = {};
+  $('table.FIR_details_table tr').each((_, row) => {
+    const label = $(row).find('th').first().text().trim();
+    const val = $(row).find('th, td').last().text().trim();
+
+    if (label.includes('Police Station')) result.firDetails.policeStation = val;
+    if (label.includes('FIR Number'))     result.firDetails.firNumber = val;
+    if (label.includes('Year'))           result.firDetails.year = val;
+  });
+
+  // ── Case History ───────────────────────────────────────
+  const history = [];
+  $('table.history_table tbody tr').each((_, row) => {
+    const cells = $(row).find('td');
+    if (cells.length >= 4) {
+      const judge = $(cells[0]).text().trim();
+      const businessDate = $(cells[1]).text().replace(/\s+/g, ' ').trim();
+      const hearingDate = $(cells[2]).text().trim();
+      const purpose = $(cells[3]).text().trim();
+
+      if (businessDate || hearingDate || purpose) {
+        history.push({ judge, businessDate, hearingDate, purpose });
       }
     }
   });
+  result.hearingHistory = history;
+  result.history = history;
 
-  // ── FIR ─────────────────────────────
-  $('table:contains("Police Station") tr').each((_, row) => {
-    const tds = $(row).find('td');
-    if (tds.length === 2) {
-      const key = $(tds[0]).text().trim();
-      const val = $(tds[1]).text().trim();
-      if (key) detail.firDetails[key] = val;
-    }
-  });
+  // ── Orders ─────────────────────────────────────────────
+  const parseOrders = (tableOrSelector) => {
+    const orders = [];
+    const root = typeof tableOrSelector === 'string' ? $(tableOrSelector) : tableOrSelector;
 
-  // ── Case History ─────────────────────
-  $('table:contains("Business on Date") tr').each((_, row) => {
-    const tds = $(row).find('td');
-    if (tds.length >= 4) {
-      const judge = $(tds[0]).text().trim();
-      const businessDate = $(tds[1]).text().trim();
-      const hearingDate = $(tds[2]).text().trim();
-      const purpose = $(tds[3]).text().trim();
+    root.find('tr').each((_, row) => {
+      const cells = $(row).find('td');
+      if (cells.length < 2) return;
 
-      if (judge || businessDate || hearingDate || purpose) {
-        detail.history.push({
-          judge,
-          businessDate,
-          hearingDate,
-          purpose,
+      const numText = $(cells[0]).text().trim().replace(/&nbsp;/g, '').trim();
+      const dateText = $(cells[1]).text().trim().replace(/&nbsp;/g, '').trim();
+      const detailsText = cells.length >= 3 ? $(cells[2]).text().trim() : '';
+      const onClick = $(row).find('a').attr('onclick') || '';
+
+      const m = onClick.match(/displayPdf\('([^']+)','([^']+)','([^']+)','([^']+)','([^']*)'\)/);
+      if (m && /\d/.test(numText)) {
+        orders.push({
+          orderNo: numText,
+          date: dateText,
+          details: detailsText,
+          normal_v: m[1],
+          case_val: m[2],
+          court_code: m[3],
+          filename: m[4],
+          appFlag: m[5],
+        });
+      } else if ((numText || dateText || detailsText) && /\d/.test(numText)) {
+        orders.push({
+          orderNo: numText,
+          date: dateText,
+          details: detailsText,
         });
       }
-    }
-  });
+    });
 
-  // ── Orders (simple text list) ───────────────────────────
-  $('table:contains("Order Number") tr').each((_, row) => {
-    const tds = $(row).find('td');
-    if (tds.length >= 3) {
-      const orderNo = $(tds[0]).text().trim();
-      const date = $(tds[1]).text().trim();
-      const details = $(tds[2]).text().trim();
+    return orders;
+  };
 
-      if (orderNo || date || details) {
-        detail.orders.push({
-          orderNo,
-          date,
-          details,
-        });
-      }
-    }
-  });
+  result.interimOrders = parseOrders('table.order_table:first-of-type');
+  result.finalOrders = parseOrders('table.order_table:last-of-type');
 
-  return detail;
+  const orderTables = $('table.order_table');
+  if (orderTables.length >= 2) {
+    result.interimOrders = parseOrders(orderTables.eq(0));
+    result.finalOrders = parseOrders(orderTables.eq(1));
+  }
+
+  result.orders = [...(result.interimOrders || []), ...(result.finalOrders || [])];
+
+  return result;
 }

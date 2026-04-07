@@ -316,12 +316,9 @@ function parseCauseListHTML(html) {
   $('table tr').each((_, row) => {
     const cells = $(row).find('td');
 
-    // Stage row
     if (cells.length === 1 && $(cells[0]).attr('colspan')) {
       const txt = $(cells[0]).text().trim();
-      if (txt && !txt.includes('---') && txt.length < 80) {
-        currentStage = txt;
-      }
+      if (txt && !txt.includes('---') && txt.length < 80) currentStage = txt;
       return;
     }
 
@@ -330,69 +327,41 @@ function parseCauseListHTML(html) {
     const srNo = $(cells[0]).text().trim();
     if (!/^\d+$/.test(srNo)) return;
 
-    const caseNoRaw = $(cells[1]).text().replace(/\s+/g, ' ').replace(/^View\s*/i, '').trim();
-
     const link = $(cells[1]).find('a').first();
     const onClick = link.attr('onclick') || '';
-    const href = link.attr('href') || '';
 
-    console.log('------ CAUSE ROW DEBUG ------');
-    console.log('srNo:', srNo);
-    console.log('caseNoRaw:', caseNoRaw);
-    console.log('onclick:', onClick);
-    console.log('href:', href);
-    console.log('-----------------------------');
+    // visible case number first
+    let caseNoRaw = link.text().replace(/\s+/g, ' ').trim();
 
+    // fallback if anchor text empty
+    if (!caseNoRaw) {
+      caseNoRaw = $(cells[1]).clone().find('script, style').remove().end().text()
+        .replace(/\s+/g, ' ')
+        .replace(/^View\s*/i, '')
+        .trim();
+    }
+
+    // extract cnr / caseNoNum / courtCode robustly
     let cnr = '';
     let caseNoNum = '';
     let courtCode = '1';
 
-    // 1) Try standard viewHistory(caseNo, 'CNR', courtCode)
-    let m = onClick.match(/viewHistory\s*\(\s*'?(\d+)'?\s*,\s*'([A-Z0-9]+)'\s*,\s*'?(\d+)'?/i);
-    if (m) {
-      caseNoNum = m[1] || '';
-      cnr = m[2] || '';
-      courtCode = m[3] || '1';
+    const vhMatch = onClick.match(/viewHistory\s*\(\s*'?(\d+)'?\s*,\s*'([^']+)'\s*,\s*'?(\d+)'?\s*\)/i);
+    if (vhMatch) {
+      caseNoNum = vhMatch[1] || '';
+      cnr = vhMatch[2] || '';
+      courtCode = vhMatch[3] || '1';
     }
 
-    // 2) Try if CNR is present elsewhere in onclick
     if (!cnr) {
       const cnrMatch = onClick.match(/\b([A-Z]{4}[A-Z0-9]{12,20})\b/i);
       if (cnrMatch) cnr = cnrMatch[1];
-    }
-
-    // 3) Try fallback numeric extraction from onclick
-    if (!caseNoNum || courtCode === '1') {
-      const nums = onClick.match(/\d+/g) || [];
-      console.log('onclick numeric tokens:', nums);
-
-      if (!caseNoNum && nums.length >= 1) {
-        caseNoNum = nums[0];
-      }
-      if (courtCode === '1' && nums.length >= 2) {
-        courtCode = nums[nums.length - 1];
-      }
-    }
-
-    // 4) Try href fallback too
-    if ((!cnr || !caseNoNum) && href) {
-      const hrefNums = href.match(/\d+/g) || [];
-      console.log('href numeric tokens:', hrefNums);
-
-      const hrefCnr = href.match(/\b([A-Z]{4}[A-Z0-9]{12,20})\b/i);
-      if (!cnr && hrefCnr) cnr = hrefCnr[1];
-      if (!caseNoNum && hrefNums.length >= 1) caseNoNum = hrefNums[0];
-      if (courtCode === '1' && hrefNums.length >= 2) courtCode = hrefNums[hrefNums.length - 1];
     }
 
     const parties = $(cells[2]).text().replace(/\s+/g, ' ').trim();
     const advocate = cells.length >= 4
       ? $(cells[3]).text().replace(/\s+/g, ' ').trim()
       : '';
-
-    console.log('parsed =>', {
-      srNo, caseNoRaw, caseNoNum, cnr, courtCode, parties, advocate, stage: currentStage
-    });
 
     cases.push({
       srNo,
