@@ -60,114 +60,6 @@ module.exports = async (req, res) => {
     }
   }
 
-  // ── causeListDetail — BA/1281/2026 → submitCaseNo → viewHistory ─────────────
-  if (action === 'causeListDetail') {
-    try {
-      const { case_no_display } = req.body; // "BA/1281/2026"
-      if (!case_no_display)
-        return res.status(400).json({ success: false, error: 'case_no_display required' });
-
-      // Parse "BA/1281/2026" → type=BA, num=1281, year=2026
-      const parts = case_no_display.trim().split('/');
-      if (parts.length < 3)
-        return res.status(200).json({ success: false, error: `Case number format galat: ${case_no_display}` });
-
-      const caseType = parts[0].trim();   // "BA"
-      const caseNum  = parts[1].trim();   // "1281"
-      const caseYear = parts[2].trim();   // "2026"
-
-      // case_type needs "BA^est_code" format — eCourts requires this
-      // est_code comes from Flutter (complexParts[1]) e.g. "1" or "null"
-      const estCode = (est_code && est_code !== 'null' && est_code !== '') ? est_code : 'null';
-      // Try both: with est suffix and without (eCourts sometimes accepts bare type)
-      const caseTypeFormatted = estCode !== 'null' ? `${caseType}^${estCode}` : caseType;
-
-      console.log(`[cld] Parsed: type=${caseTypeFormatted} num=${caseNum} year=${caseYear} est=${estCode}`);
-
-      // Step 1: submitCaseNo — no CAPTCHA needed for this path
-      const rawBody = [
-        `case_type=${caseTypeFormatted}`,
-        `search_case_no=${encodeURIComponent(caseNum)}`,
-        `case_no=${encodeURIComponent(caseNum)}`,
-        `rgyear=${encodeURIComponent(caseYear)}`,
-        `case_captcha_code=`,
-        `state_code=${encodeURIComponent(state_code || '')}`,
-        `dist_code=${encodeURIComponent(dist_code || '')}`,
-        `court_complex_code=${encodeURIComponent(complexCode)}`,
-        `est_code=${estCode}`,
-        `ajax_req=true`,
-        `app_token=`,
-      ].join('&');
-
-      console.log('[cld] submitCaseNo body:', rawBody);
-
-      const r1 = await axios.post(`${BASE}/?p=casestatus/submitCaseNo`, rawBody, {
-        headers: { ...H, 'Cookie': cookieStr || '' },
-        timeout: 15000,
-      });
-
-      const raw1 = r1.data;
-      console.log('[cld] submitCaseNo keys:', typeof raw1 === 'object' ? Object.keys(raw1) : 'str');
-      console.log('[cld] submitCaseNo preview:', JSON.stringify(raw1).slice(0, 300));
-
-      let html1 = '';
-      if (typeof raw1 === 'object') {
-        html1 = raw1.case_data || raw1.adv_data || raw1.casetype_list || raw1.filing_data || raw1.data || '';
-        if (!html1) for (const v of Object.values(raw1))
-          if (typeof v === 'string' && v.includes('<table')) { html1 = v; break; }
-      } else { html1 = raw1; }
-
-      if (!html1 || html1.trim().length < 20) {
-        return res.status(200).json({ success: false, error: `Case ${case_no_display} search mein nahi mila`, debug: JSON.stringify(raw1).slice(0,200) });
-      }
-
-      const results = parseResults(html1);
-      console.log('[cld] submitCaseNo results:', results.length);
-
-      if (!results.length || !results[0].caseNoNum) {
-        return res.status(200).json({ success: false, error: 'Case number se viewHistory ID nahi mila', resultsLen: results.length, firstResult: results[0] });
-      }
-
-      const hit = results[0];
-      console.log(`[cld] Found: caseNoNum=${hit.caseNoNum} cnr=${hit.cnr} courtCode=${hit.courtCode}`);
-
-      // Step 2: viewHistory
-      const params2 = new URLSearchParams({
-        court_code:         hit.courtCode || '1',
-        state_code:         state_code || '',
-        dist_code:          dist_code  || '',
-        court_complex_code: complexCode,
-        case_no:            hit.caseNoNum,
-        cino:               hit.cnr || '',
-        hideparty:          '',
-        search_flag:        'CScaseNumber',
-        search_by:          'CaseNo',
-        ajax_req:           'true',
-        app_token:          '',
-      });
-
-      const r2 = await axios.post(`${BASE}/?p=home/viewHistory`, params2.toString(), {
-        headers: { ...H, 'Cookie': cookieStr || '' },
-        timeout: 15000,
-      });
-
-      const raw2 = r2.data;
-      console.log('[cld] viewHistory type:', typeof raw2, '| data_list len:', (raw2?.data_list || '').length);
-
-      const html2 = typeof raw2 === 'object' ? (raw2.data_list || '') : raw2;
-      if (!html2 || html2.length < 20) {
-        return res.status(200).json({ success: false, error: 'Case detail nahi mili', raw2Preview: JSON.stringify(raw2).slice(0,200) });
-      }
-
-      const detail = parseDetailHTML(html2, hit.cnr);
-      return res.status(200).json({ success: true, detail });
-
-    } catch (err) {
-      console.error('[cld] error:', err.message);
-      return res.status(500).json({ success: false, error: err.message });
-    }
-  }
-
   // ── viewHistory — NO CAPTCHA ───────────────────────────────────────────────
   if (action === 'viewHistory') {
     try {
@@ -179,20 +71,17 @@ module.exports = async (req, res) => {
         case_no:            case_no    || '',
         cino:               cino       || '',
         hideparty:          '',
-        search_flag:        search_by === 'CauseList' ? 'CLcauselist' : 'CScaseNumber',
-        search_by:          search_by  || 'CauseList',
+        search_flag:        'CScaseNumber',
+        search_by:          search_by  || 'CSAdvName',
         ajax_req:           'true',
         app_token:          '',
       });
       const resp = await axios.post(`${BASE}/?p=home/viewHistory`, params.toString(),
         { headers: { ...H, 'Cookie': cookieStr || '' }, timeout: 15000 });
       const raw  = resp.data;
-      console.log("[vh] type:", typeof raw, "| keys:", typeof raw === "object" ? Object.keys(raw).join(",") : "str");
-      console.log("[vh] data_list len:", (raw?.data_list || "").length);
-      console.log("[vh] raw preview:", JSON.stringify(raw).slice(0, 400));
       const html = typeof raw === 'object' ? (raw.data_list || '') : raw;
       if (!html || html.length < 20)
-        return res.status(200).json({ success: false, error: "Case detail not found", rawPreview: JSON.stringify(raw).slice(0, 300) });
+        return res.status(200).json({ success: false, error: 'Case detail not found' });
       const detail = parseDetailHTML(html, cino);
       return res.status(200).json({ success: true, detail });
     } catch (err) {
