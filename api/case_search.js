@@ -79,9 +79,12 @@ module.exports = async (req, res) => {
       const resp = await axios.post(`${BASE}/?p=home/viewHistory`, params.toString(),
         { headers: { ...H, 'Cookie': cookieStr || '' }, timeout: 15000 });
       const raw  = resp.data;
+      console.log("[vh] type:", typeof raw, "| keys:", typeof raw === "object" ? Object.keys(raw).join(",") : "str");
+      console.log("[vh] data_list len:", (raw?.data_list || "").length);
+      console.log("[vh] raw preview:", JSON.stringify(raw).slice(0, 400));
       const html = typeof raw === 'object' ? (raw.data_list || '') : raw;
       if (!html || html.length < 20)
-        return res.status(200).json({ success: false, error: 'Case detail not found' });
+        return res.status(200).json({ success: false, error: "Case detail not found", rawPreview: JSON.stringify(raw).slice(0, 300) });
       const detail = parseDetailHTML(html, cino);
       return res.status(200).json({ success: true, detail });
     } catch (err) {
