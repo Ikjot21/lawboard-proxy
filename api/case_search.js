@@ -169,31 +169,68 @@ module.exports = async (req, res) => {
         ajax_req: 'true', app_token: '',
       });
     } else if (searchType === 'caseNo') {
-      // ── Case Number search ─────────────────────────────────────────────────
       const { case_type, search_case_no, rgyear, case_captcha_code } = req.body;
       if (!case_type)        return res.status(400).json({ success: false, error: 'Case type required' });
       if (!search_case_no)   return res.status(400).json({ success: false, error: 'Case number required' });
       if (!rgyear)           return res.status(400).json({ success: false, error: 'Year required' });
       endpoint = 'casestatus/submitCaseNo';
-      // NOTE: eCourts uses 'case_captcha_code' for this endpoint
-      // case_type must be decoded e.g. "BA" not "BA%5E4" or "25^4"
-      // The ^ character in case_type separates type code from est_code
-      const caseTypeParts = decodeURIComponent(case_type).split('^');
-      const caseTypeOnly = caseTypeParts[0]; // e.g. "BA"
-      params = new URLSearchParams({
-        case_type:          decodeURIComponent(case_type), // send full e.g. "BA^4"
-        search_case_no:     search_case_no.trim(),
-        rgyear:             rgyear.trim(),
-        case_captcha_code:  case_captcha_code?.trim() || '',
-        state_code:         state_code  || '',
-        dist_code:          dist_code   || '',
-        court_complex_code: complexCode,
-        est_code:           '0',
-        ajax_req:           'true',
-        app_token:          '',
-      });
-      console.log('[caseNo] case_type raw:', case_type, '→ decoded:', decodeURIComponent(case_type));
-      console.log('[caseNo] params:', params.toString());
+
+      // CRITICAL: case_type contains "BA^4" — the ^ must NOT be URL-encoded.
+      // URLSearchParams encodes ^ to %5E which eCourts rejects.
+      // Build raw string manually to preserve the ^ character.
+      const rawCaseType = decodeURIComponent(case_type); // decode first in case Flutter encoded it
+      const rawBody = [
+        `case_type=${rawCaseType}`,
+        `search_case_no=${encodeURIComponent(search_case_no.trim())}`,
+        `rgyear=${encodeURIComponent(rgyear.trim())}`,
+        `case_captcha_code=${encodeURIComponent(case_captcha_code?.trim() || '')}`,
+        `state_code=${encodeURIComponent(state_code || '')}`,
+        `dist_code=${encodeURIComponent(dist_code || '')}`,
+        `court_complex_code=${encodeURIComponent(complexCode)}`,
+        `est_code=0`,
+        `ajax_req=true`,
+        `app_token=`,
+      ].join('&');
+
+      console.log('[caseNo] rawCaseType:', rawCaseType);
+      console.log('[caseNo] rawBody:', rawBody);
+
+      // Send directly — bypass params/URLSearchParams
+      try {
+        const ecResp = await axios.post(
+          `${BASE}/?p=${endpoint}`,
+          rawBody,
+          {
+            headers: { ...H, 'Cookie': cookieStr || '' },
+            timeout: 15000,
+          }
+        );
+        const raw = ecResp.data;
+        const rawStr = JSON.stringify(raw);
+        console.log('[caseNo] raw keys:', typeof raw === 'object' ? Object.keys(raw) : 'string');
+        console.log('[caseNo] raw preview:', rawStr.substring(0, 400));
+
+        if (rawStr.toLowerCase().includes('invalid captcha') || rawStr.toLowerCase().includes('wrong captcha'))
+          return res.status(200).json({ success: false, error: 'Incorrect CAPTCHA — please try again' });
+
+        let html = '';
+        if (typeof raw === 'object') {
+          html = raw.case_data || raw.adv_data || raw.casetype_list || raw.filing_data || raw.data || raw.html || '';
+          if (!html) for (const v of Object.values(raw))
+            if (typeof v === 'string' && v.includes('<table')) { html = v; break; }
+        } else { html = raw; }
+
+        if (!html || html.trim().length < 20) {
+          console.log('[caseNo] no html found, raw:', rawStr.substring(0, 300));
+          return res.status(200).json({ success: false, error: 'No cases found', debug: typeof raw === 'object' ? Object.keys(raw) : 'string' });
+        }
+
+        const results = parseResults(html);
+        return res.status(200).json({ success: true, results, total: results.length });
+      } catch (err) {
+        console.error('[caseNo] error:', err.message);
+        return res.status(500).json({ success: false, error: err.message });
+      }
     } else {
       return res.status(400).json({ success: false, error: 'action or searchType required' });
     }
