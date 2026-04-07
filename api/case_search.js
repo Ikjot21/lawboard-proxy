@@ -391,16 +391,21 @@ function parseDetailHTML(html, cino) {
 
   const detail = {
     cnr: cino || '',
+
+    // ── Case Details ──
     caseType: getText('Case Type'),
     filingNumber: getText('Filing Number'),
     filingDate: getText('Filing Date'),
     regNumber: getText('Registration Number'),
     regDate: getText('Registration Date'),
 
+    // ✅ ADD THESE HERE 👇
+    caseStatusFull: getText('Case Status'),
+    disposal: getText('Nature of Disposal'),
+
+    // ── Status ──
     firstHearingDate: getText('First Hearing Date'),
     decisionDate: getText('Decision Date'),
-    caseStatus: getText('Case Status'),
-    disposal: getText('Nature of Disposal'),
 
     courtJudge: getText('Court Number and Judge'),
 
