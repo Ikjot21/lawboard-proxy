@@ -370,6 +370,18 @@ function parseDetailHTML(html, cnr) {
   const $ = cheerio.load(html);
   const result = { cnr: cnr || '' };
 
+  // ── CNR Number — set immediately from param, then try to find in HTML ──
+  result.cnrNumber = (cnr || '').trim().toUpperCase();
+  // Try to find from span/td with danger class or strong tag in case details
+  const cnrCandidates = [
+    $('span.text-danger').first().text().trim(),
+    $('td.text-danger').first().text().trim(),
+    $('strong').filter((_, el) => /^[A-Z]{2}[A-Z0-9]{2}\d{9,}$/.test($(el).text().trim())).first().text().trim(),
+  ];
+  for (const c of cnrCandidates) {
+    if (c && c.length >= 10 && /^[A-Z]/.test(c)) { result.cnrNumber = c; break; }
+  }
+
   // Court name
   result.courtName = $('h2').first().text().trim();
 
@@ -394,10 +406,6 @@ function parseDetailHTML(html, cnr) {
   }
   if (!result.caseStatus && result.caseStatusFull) {
     result.caseStatus = result.caseStatusFull;
-  }
-
-  if (!result.cnrNumber) {
-    result.cnrNumber = $('span.text-danger').first().text().trim() || cnr || '';
   }
 
   // ── Case Status table ─────────────────────────────────────
