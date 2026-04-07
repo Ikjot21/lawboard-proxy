@@ -71,8 +71,8 @@ module.exports = async (req, res) => {
         case_no:            case_no    || '',
         cino:               cino       || '',
         hideparty:          '',
-        search_flag:        'CScaseNumber',
-        search_by:          search_by  || 'CSAdvName',
+        search_flag:        search_by === 'CauseList' ? 'CLcauselist' : 'CScaseNumber',
+        search_by:          search_by  || 'CauseList',
         ajax_req:           'true',
         app_token:          '',
       });
