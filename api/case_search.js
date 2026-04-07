@@ -76,12 +76,17 @@ module.exports = async (req, res) => {
       const caseNum  = parts[1].trim();   // "1281"
       const caseYear = parts[2].trim();   // "2026"
 
-      console.log(`[cld] Parsed: type=${caseType} num=${caseNum} year=${caseYear}`);
+      // case_type needs "BA^est_code" format — eCourts requires this
+      // est_code comes from Flutter (complexParts[1]) e.g. "1" or "null"
+      const estCode = (est_code && est_code !== 'null' && est_code !== '') ? est_code : 'null';
+      // Try both: with est suffix and without (eCourts sometimes accepts bare type)
+      const caseTypeFormatted = estCode !== 'null' ? `${caseType}^${estCode}` : caseType;
+
+      console.log(`[cld] Parsed: type=${caseTypeFormatted} num=${caseNum} year=${caseYear} est=${estCode}`);
 
       // Step 1: submitCaseNo — no CAPTCHA needed for this path
-      // case_type needs "BA^X" format — try without est suffix first
       const rawBody = [
-        `case_type=${caseType}`,
+        `case_type=${caseTypeFormatted}`,
         `search_case_no=${encodeURIComponent(caseNum)}`,
         `case_no=${encodeURIComponent(caseNum)}`,
         `rgyear=${encodeURIComponent(caseYear)}`,
@@ -89,7 +94,7 @@ module.exports = async (req, res) => {
         `state_code=${encodeURIComponent(state_code || '')}`,
         `dist_code=${encodeURIComponent(dist_code || '')}`,
         `court_complex_code=${encodeURIComponent(complexCode)}`,
-        `est_code=null`,
+        `est_code=${estCode}`,
         `ajax_req=true`,
         `app_token=`,
       ].join('&');
