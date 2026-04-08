@@ -330,17 +330,31 @@ function parseCauseListHTML(html) {
     const link = $(cells[1]).find('a').first();
     const onClick = link.attr('onclick') || '';
 
-    // Case number — strip the "View" button text, get remaining text
-    let caseNoRaw = $(cells[1]).clone()
-      .find('a, button, input').remove().end()  // remove View button
+    // Case cell may contain: "BA/1230/2026\nNext hearing date:- 08-04-2026"
+    // Get full text of cell minus the View button
+    const cellText = $(cells[1]).clone()
+      .find('a, button, input').remove().end()
       .text()
+      .replace(/&nbsp;/g, ' ')
+      .trim();
+
+    // Extract next date if present in cell text
+    let nextDate = '';
+    const nextDateMatch = cellText.match(/Next\s+hearing\s+date\s*[:\-]+\s*([\d\-\/]+)/i)
+      || cellText.match(/(\d{2}-\d{2}-\d{4})/);
+    if (nextDateMatch) nextDate = nextDateMatch[1].trim();
+
+    // Case number = everything before "Next hearing" or date pattern
+    let caseNoRaw = cellText
+      .replace(/Next\s+hearing\s+date[\s:\-]*([\d\-\/]+)?/gi, '')
+      .replace(/\d{2}-\d{2}-\d{4}/g, '')
       .replace(/\s+/g, ' ')
       .trim();
 
-    // If still empty, try link text minus "View"
     if (!caseNoRaw) {
       caseNoRaw = $(cells[1]).text()
         .replace(/\bView\b/gi, '')
+        .replace(/Next\s+hearing\s+date[\s:\-]*([\d\-\/]+)?/gi, '')
         .replace(/\s+/g, ' ')
         .trim();
     }
@@ -418,6 +432,7 @@ function parseCauseListHTML(html) {
       advocate,
       petAdvocate,
       respAdvocate,
+      nextDate,
       stage: currentStage,
     });
   });
