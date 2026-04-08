@@ -249,13 +249,14 @@ module.exports = async (req, res) => {
 
     // ── Step 6: Batch fetch nextDate for a batch of cases ──────────────────
     if (action === 'nextdates') {
-      // Flutter sends: { action:'nextdates', cases:[{caseNoNum,cnr,courtCode},...], state_code, dist_code, complex_code }
       const batchCases = req.body.cases || [];
       if (!batchCases.length) return res.status(200).json({ success: true, dates: {} });
+      console.log('[NEXTDATES] batch size:', batchCases.length, '| first cnr:', batchCases[0]?.cnr);
 
-      const results = {}; // cnr → nextDate
+      const results = {};
 
       await Promise.allSettled(batchCases.map(async (c) => {
+        if (!c.cnr) return;
         try {
           const p = new URLSearchParams({
             court_code:         c.courtCode || '1',
@@ -263,7 +264,7 @@ module.exports = async (req, res) => {
             dist_code:          dist_code  || '',
             court_complex_code: (complex_code || '').split('@')[0],
             case_no:            c.caseNoNum || '',
-            cino:               c.cnr || '',
+            cino:               c.cnr,
             hideparty:          '',
             search_flag:        'CScaseNumber',
             search_by:          'CSAdvName',
@@ -277,16 +278,27 @@ module.exports = async (req, res) => {
           );
           const raw = r.data;
           const detailHtml = typeof raw === 'object' ? (raw.data_list || '') : raw;
-          if (!detailHtml || detailHtml.length < 20) return;
+          if (!detailHtml || detailHtml.length < 20) {
+            console.log('[NEXTDATES] empty html for', c.cnr);
+            return;
+          }
 
-          // Extract next date — multiple patterns
-          const m = detailHtml.match(/Next\s+Hearing\s+Date[\s\S]{0,60}?(\d{2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})/i)
-            || detailHtml.match(/>(\d{2}(?:st|nd|rd|th)\s+\w+\s+\d{4})<\/strong>/i)
-            || detailHtml.match(/>(\d{2}-\d{2}-\d{4})<\/strong>/i);
-          if (m) results[c.cnr] = m[1].trim();
-        } catch (_) {}
+          // Extract nextDate — try all eCourts patterns
+          const text = detailHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+          const m = text.match(/Next\s+Hearing\s+Date\s*[:\-]?\s*(\d{2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})/i)
+            || text.match(/Next\s+Date\s*[:\-]?\s*(\d{2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})/i);
+          if (m) {
+            results[c.cnr] = m[1].trim();
+            console.log('[NEXTDATES]', c.cnr, '->', m[1].trim());
+          } else {
+            console.log('[NEXTDATES] no date found for', c.cnr, '| text snippet:', text.slice(0, 200));
+          }
+        } catch (e) {
+          console.log('[NEXTDATES] error for', c.cnr, ':', e.message);
+        }
       }));
 
+      console.log('[NEXTDATES] results:', Object.keys(results).length, 'dates found');
       return res.status(200).json({ success: true, dates: results });
     }
 
