@@ -377,26 +377,18 @@ function parseCauseListHTML(html) {
     }
 
     const partiesHtml = $(cells[2]).html() || '';
-    // eCourts format: "Party1Name<br>versus<br>Party2Name"
-    // Strip tags, split by br, then find "versus" as separator
     const partiesText = partiesHtml
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<[^>]+>/g, '')
       .replace(/&nbsp;/g, ' ')
-      .replace(/\s*\bversus\b\s*/gi, '\n')   // "versus" → newline separator
+      .replace(/\s*\bversus\b\s*/gi, '\n')
       .split('\n')
       .map(l => l.trim())
       .filter(Boolean);
-    // Join with " vs " — but avoid "vs vs" if already present
     const partiesClean = partiesText.join(' vs ').replace(/\s+vs\s+vs\s+/gi, ' vs ').replace(/\s{2,}/g, ' ').trim();
 
-    // Advocate column — eCourts puts both pet + resp advocates here
-    // Format: "PET_ADV_NAME RESP_ADV_NAME" or sometimes separated by newline/br
-    const advRaw = cells.length >= 4
-      ? $(cells[3]).html() || ''
-      : '';
-
-    // Split by <br> first, then by 2+ spaces
+    // Advocate column (index 3)
+    const advRaw = cells.length >= 4 ? $(cells[3]).html() || '' : '';
     const advLines = advRaw
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<[^>]+>/g, '')
@@ -411,7 +403,6 @@ function parseCauseListHTML(html) {
       respAdvocate = advLines[1].trim();
       advocate = petAdvocate;
     } else if (advLines.length === 1) {
-      // Single line — try splitting by 3+ spaces (two names concatenated)
       const parts = advLines[0].split(/\s{3,}/);
       if (parts.length >= 2) {
         petAdvocate  = parts[0].trim();
@@ -420,6 +411,20 @@ function parseCauseListHTML(html) {
         petAdvocate = advLines[0].trim();
       }
       advocate = petAdvocate;
+    }
+
+    // Next date — criminal has 5th column, civil has it inside case cell
+    // Check 5th column first (criminal), then fallback to what was already extracted
+    if (!nextDate && cells.length >= 5) {
+      const col4 = $(cells[4]).text().replace(/&nbsp;/g, ' ').trim();
+      const m = col4.match(/(\d{2}-\d{2}-\d{4})/);
+      if (m) nextDate = m[1];
+    }
+    // Also check 4th column in case advocate is missing and date is there
+    if (!nextDate && cells.length >= 4) {
+      const col3 = $(cells[3]).text().replace(/&nbsp;/g, ' ').trim();
+      const m = col3.match(/(\d{2}-\d{2}-\d{4})/);
+      if (m) nextDate = m[1];
     }
 
     cases.push({
