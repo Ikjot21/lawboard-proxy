@@ -251,50 +251,29 @@ module.exports = async (req, res) => {
     if (action === 'nextdates') {
       const batchCases = req.body.cases || [];
       if (!batchCases.length) return res.status(200).json({ success: true, dates: {} });
-      console.log('[NEXTDATES] batch size:', batchCases.length);
 
       const results = {};
-
-      // Sequential — not parallel — to avoid eCourts rate limiting
-      for (const c of batchCases) {
-        if (!c.cnr) continue;
+      await Promise.allSettled(batchCases.map(async (c) => {
+        if (!c.cnr) return;
         try {
           const p = new URLSearchParams({
-            court_code:         c.courtCode || '1',
-            state_code:         state_code || '',
-            dist_code:          dist_code  || '',
-            court_complex_code: (complex_code || '').split('@')[0],
-            case_no:            c.caseNoNum || '',
-            cino:               c.cnr,
-            hideparty:          '',
-            search_flag:        'CScaseNumber',
-            search_by:          'CSAdvName',
-            ajax_req:           'true',
-            app_token:          '',
+            court_code: c.courtCode || '1', state_code: state_code || '',
+            dist_code: dist_code || '', court_complex_code: (complex_code || '').split('@')[0],
+            case_no: c.caseNoNum || '', cino: c.cnr,
+            hideparty: '', search_flag: 'CScaseNumber', search_by: 'CSAdvName',
+            ajax_req: 'true', app_token: '',
           });
-          const r = await axios.post(
-            `${BASE}/?p=home/viewHistory`,
-            p.toString(),
-            { headers: H, timeout: 12000 }
-          );
+          const r = await axios.post(`${BASE}/?p=home/viewHistory`, p.toString(),
+            { headers: H, timeout: 9000 });
           const raw = r.data;
-          const detailHtml = typeof raw === 'object' ? (raw.data_list || '') : raw;
-          if (!detailHtml || detailHtml.length < 20) continue;
-
-          const text = detailHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+          const html = typeof raw === 'object' ? (raw.data_list || '') : raw;
+          if (!html || html.length < 20) return;
+          const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
           const m = text.match(/Next\s+(?:Hearing\s+)?Date\s*[:\-]?\s*(\d{2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})/i);
-          if (m) {
-            results[c.cnr] = m[1].trim();
-            console.log('[NEXTDATES]', c.cnr, '->', m[1].trim());
-          }
-        } catch (e) {
-          console.log('[NEXTDATES] skip', c.cnr, e.message);
-        }
-        // Small delay between each call
-        await new Promise(r => setTimeout(r, 300));
-      }
+          if (m) results[c.cnr] = m[1].trim();
+        } catch (_) {}
+      }));
 
-      console.log('[NEXTDATES] done:', Object.keys(results).length, '/', batchCases.length);
       return res.status(200).json({ success: true, dates: results });
     }
 
