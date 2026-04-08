@@ -348,9 +348,21 @@ function parseResults(html) {
     if (!srNo.match(/^\d+$/)) return;
     const caseNo    = $(cells[1]).text().trim().replace(/\s+/g, ' ');
     const partiesHtml = $(cells[2]).html() || '';
-    const parties   = partiesHtml.replace(/<br\s*\/?>/gi, ' Vs ').replace(/<[^>]+>/g, '')
-      .replace(/\s+/g, ' ').replace(/\bVs\s+Vs\b/g, 'Vs').trim();
-    const advocate  = $(cells[3]).text().trim().replace(/\s+/g, ' ');
+    const parties   = partiesHtml.replace(/<br\s*\/?>/gi, ' vs ').replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ').replace(/\bvs\s+vs\b/gi, 'vs').trim();
+
+    // Advocate cell — split by <br> to separate pet adv and resp adv
+    const advHtml = $(cells[3]).html() || '';
+    const advLines = advHtml
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean);
+    const petAdvocate  = advLines[0] || '';
+    const respAdvocate = advLines[1] || '';
+    const advocate     = petAdvocate; // keep for backward compat
     const viewCell  = cells.length >= 5 ? $(cells[4]) : $(row);
     const onClick   = viewCell.find('a').attr('onclick') || '';
     const vhMatch   = onClick.match(/viewHistory\((\d+),'([A-Z0-9]+)',(\d+)/);
@@ -359,7 +371,8 @@ function parseResults(html) {
       cnr:       vhMatch ? vhMatch[2] : '',
       caseNoNum: vhMatch ? vhMatch[1] : '',
       courtCode: vhMatch ? vhMatch[3] : '1',
-      parties, advocate, court: currentCourt, nextDate: '',
+      parties, advocate, petAdvocate, respAdvocate,
+      court: currentCourt, nextDate: '',
     });
   });
   return results;
