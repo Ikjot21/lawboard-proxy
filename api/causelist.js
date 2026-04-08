@@ -274,7 +274,7 @@ module.exports = async (req, res) => {
           const r = await axios.post(
             `${BASE}/?p=home/viewHistory`,
             p.toString(),
-            { headers: H, timeout: 8000 }
+            { headers: H, timeout: 12000 }
           );
           const raw = r.data;
           const detailHtml = typeof raw === 'object' ? (raw.data_list || '') : raw;
