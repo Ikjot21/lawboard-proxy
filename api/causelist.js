@@ -363,18 +363,18 @@ function parseCauseListHTML(html) {
     }
 
     const partiesHtml = $(cells[2]).html() || '';
-    const partiesClean = partiesHtml
-      .replace(/<br\s*\/?>/gi, '\n')        // br → newline
-      .replace(/<[^>]+>/g, '')              // strip all tags
+    // eCourts format: "Party1Name<br>versus<br>Party2Name"
+    // Strip tags, split by br, then find "versus" as separator
+    const partiesText = partiesHtml
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
       .replace(/&nbsp;/g, ' ')
+      .replace(/\s*\bversus\b\s*/gi, '\n')   // "versus" → newline separator
       .split('\n')
       .map(l => l.trim())
-      .filter(Boolean)
-      .join(' vs ')                         // join lines with " vs "
-      .replace(/\s*\bversus\b\s*/gi, ' vs ') // "versus" word → "vs"
-      .replace(/\bvs\s+vs\b/gi, 'vs')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
+      .filter(Boolean);
+    // Join with " vs " — but avoid "vs vs" if already present
+    const partiesClean = partiesText.join(' vs ').replace(/\s+vs\s+vs\s+/gi, ' vs ').replace(/\s{2,}/g, ' ').trim();
 
     // Advocate column — eCourts puts both pet + resp advocates here
     // Format: "PET_ADV_NAME RESP_ADV_NAME" or sometimes separated by newline/br
