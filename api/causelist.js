@@ -250,10 +250,11 @@ module.exports = async (req, res) => {
     // ── Step 6: Batch fetch nextDate for a batch of cases ──────────────────
     if (action === 'nextdates') {
       const batchCases = req.body.cases || [];
-      if (!batchCases.length) return res.status(200).json({ success: true, dates: {} });
+      if (!batchCases.length) return res.status(200).json({ success: true, dates: {}, details: {} });
 
-      const results = {};
-      // All parallel, 6s timeout each — fits in Vercel 20s window
+      const dates   = {};  // cnr → nextDate string
+      const details = {};  // cnr → { disposal, caseStage, caseStatus }
+
       await Promise.allSettled(batchCases.map(async (c) => {
         if (!c.cnr) return;
         try {
@@ -270,13 +271,29 @@ module.exports = async (req, res) => {
           const raw = r.data;
           const html = typeof raw === 'object' ? (raw.data_list || '') : raw;
           if (!html || html.length < 20) return;
+
           const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-          const m = text.match(/Next\s+(?:Hearing\s+)?Date\s*[:\-]?\s*(\d{2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})/i);
-          if (m) results[c.cnr] = m[1].trim();
+
+          // Next date
+          const mDate = text.match(/Next\s+(?:Hearing\s+)?Date\s*[:\-]?\s*(\d{2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})/i);
+          if (mDate) dates[c.cnr] = mDate[1].trim();
+
+          // Disposal / Nature of Disposal
+          const mDisp = text.match(/Nature\s+of\s+Disposal\s+([A-Za-z\s\-]+?)(?=\s{2,}|\s*Court|\s*Stage|\s*$)/i);
+          const mStage = text.match(/Case\s+Stage\s+([A-Za-z\s\-]+?)(?=\s{2,}|\s*Court|\s*$)/i);
+          const mStatus = text.match(/Case\s+Status\s+([A-Za-z\s]+?)(?=\s{2,}|\s*Nature|\s*$)/i);
+
+          const disposal    = (mDisp  ? mDisp[1].trim()  : '');
+          const caseStage   = (mStage ? mStage[1].trim() : '');
+          const caseStatus  = (mStatus? mStatus[1].trim(): '');
+
+          if (disposal || caseStage || caseStatus) {
+            details[c.cnr] = { disposal, caseStage, caseStatus };
+          }
         } catch (_) {}
       }));
 
-      return res.status(200).json({ success: true, dates: results });
+      return res.status(200).json({ success: true, dates, details });
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });
