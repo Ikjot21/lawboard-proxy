@@ -228,11 +228,68 @@ module.exports = async (req, res) => {
         : rawResp;
 
       console.log('Submit html len:', html.length, '| preview:', html.slice(0, 150));
-    console.log('===== RAW CAUSE HTML SAMPLE =====');
-    console.log(html.slice(0, 3000));
-    console.log('=================================');
+
+      // Log first few rows to understand structure
+      const $dbg = cheerio.load(html);
+      let rowCount = 0;
+      $dbg('table tr').each((_, row) => {
+        if (rowCount++ > 8) return false;
+        const cells = $dbg(row).find('td');
+        if (cells.length < 2) return;
+        console.log(`[ROW] cells=${cells.length}`);
+        cells.each((ci, cell) => {
+          console.log(`  [${ci}]: "${$dbg(cell).text().replace(/\s+/g,' ').trim().slice(0,100)}"`);
+        });
+      });
+
       const cases = parseCauseListHTML(html);
       console.log('Parsed cases:', cases.length);
+      if (cases.length > 0) console.log('[CASE0]', JSON.stringify(cases[0]));
+
+      // ── Background fetch nextDate for cases missing it (criminal) ──────────
+      // viewHistory returns detail including nextDate — run in parallel, 10s limit
+      const casesNeedingDate = cases.filter(c => !c.nextDate && c.caseNoNum && c.cnr);
+      if (casesNeedingDate.length > 0) {
+        console.log(`Fetching nextDate for ${casesNeedingDate.length} cases via viewHistory`);
+        const fetchNextDate = async (c) => {
+          try {
+            const p = new URLSearchParams({
+              court_code: c.courtCode || '1',
+              state_code: state_code || '',
+              dist_code: dist_code || '',
+              court_complex_code: complex_code || '',
+              case_no: c.caseNoNum,
+              cino: c.cnr,
+              hideparty: '',
+              search_flag: 'CScaseNumber',
+              search_by: 'CSAdvName',
+              ajax_req: 'true',
+              app_token: '',
+            });
+            const r = await axios.post(
+              `${BASE}/?p=home/viewHistory`,
+              p.toString(),
+              { headers: H, timeout: 8000 }
+            );
+            const raw = r.data;
+            const detailHtml = typeof raw === 'object' ? (raw.data_list || '') : raw;
+            if (!detailHtml) return;
+            // Extract next date from detail HTML
+            const dateMatch = detailHtml.match(/Next\s+Hearing\s+Date[^<]*<[^>]+>([^<]+)/i)
+              || detailHtml.match(/(\d{2}(?:st|nd|rd|th)\s+\w+\s+\d{4})/i)
+              || detailHtml.match(/(\d{2}-\d{2}-\d{4})/);
+            if (dateMatch) c.nextDate = dateMatch[1].trim();
+          } catch (_) {}
+        };
+        // Run in batches of 8 to avoid Vercel 20s timeout
+        const BATCH = 8;
+        for (let i = 0; i < casesNeedingDate.length; i += BATCH) {
+          const batch = casesNeedingDate.slice(i, i + BATCH);
+          await Promise.allSettled(batch.map(fetchNextDate));
+        }
+        console.log('nextDate fetched, sample:', casesNeedingDate[0]?.nextDate);
+      }
+
       return res.status(200).json({ success: true, cases, totalCases: cases.length });
     }
 
