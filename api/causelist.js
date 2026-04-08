@@ -413,19 +413,19 @@ function parseCauseListHTML(html) {
       advocate = petAdvocate;
     }
 
-    // Next date — criminal has 5th column, civil has it inside case cell
-    // Check 5th column first (criminal), then fallback to what was already extracted
-    if (!nextDate && cells.length >= 5) {
-      const col4 = $(cells[4]).text().replace(/&nbsp;/g, ' ').trim();
-      const m = col4.match(/(\d{2}-\d{2}-\d{4})/);
-      if (m) nextDate = m[1];
+    // Next date — try all possible locations:
+    // 1. Already extracted from case cell text (civil - inside cell)
+    // 2. 5th column (criminal - separate column)
+    // 3. Scan all remaining columns
+    if (!nextDate) {
+      for (let ci = 3; ci < cells.length; ci++) {
+        const txt = $(cells[ci]).text().replace(/&nbsp;/g, ' ').trim();
+        const m = txt.match(/(\d{2}-\d{2}-\d{4})/);
+        if (m) { nextDate = m[1]; break; }
+      }
     }
-    // Also check 4th column in case advocate is missing and date is there
-    if (!nextDate && cells.length >= 4) {
-      const col3 = $(cells[3]).text().replace(/&nbsp;/g, ' ').trim();
-      const m = col3.match(/(\d{2}-\d{2}-\d{4})/);
-      if (m) nextDate = m[1];
-    }
+
+    console.log(`[${srNo}] caseNo="${caseNoRaw}" cells=${cells.length} nextDate="${nextDate}`);
 
     cases.push({
       srNo,
