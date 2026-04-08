@@ -253,18 +253,20 @@ module.exports = async (req, res) => {
       if (!batchCases.length) return res.status(200).json({ success: true, dates: {} });
 
       const results = {};
+      // All parallel, 6s timeout each — fits in Vercel 20s window
       await Promise.allSettled(batchCases.map(async (c) => {
         if (!c.cnr) return;
         try {
           const p = new URLSearchParams({
             court_code: c.courtCode || '1', state_code: state_code || '',
-            dist_code: dist_code || '', court_complex_code: (complex_code || '').split('@')[0],
+            dist_code: dist_code || '',
+            court_complex_code: (complex_code || '').split('@')[0],
             case_no: c.caseNoNum || '', cino: c.cnr,
-            hideparty: '', search_flag: 'CScaseNumber', search_by: 'CSAdvName',
-            ajax_req: 'true', app_token: '',
+            hideparty: '', search_flag: 'CScaseNumber',
+            search_by: 'CSAdvName', ajax_req: 'true', app_token: '',
           });
-          const r = await axios.post(`${BASE}/?p=home/viewHistory`, p.toString(),
-            { headers: H, timeout: 9000 });
+          const r = await axios.post(`${BASE}/?p=home/viewHistory`,
+            p.toString(), { headers: H, timeout: 6000 });
           const raw = r.data;
           const html = typeof raw === 'object' ? (raw.data_list || '') : raw;
           if (!html || html.length < 20) return;
