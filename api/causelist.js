@@ -330,14 +330,18 @@ function parseCauseListHTML(html) {
     const link = $(cells[1]).find('a').first();
     const onClick = link.attr('onclick') || '';
 
-    // visible case number first
-    let caseNoRaw = link.text().replace(/\s+/g, ' ').trim();
+    // Case number — strip the "View" button text, get remaining text
+    let caseNoRaw = $(cells[1]).clone()
+      .find('a, button, input').remove().end()  // remove View button
+      .text()
+      .replace(/\s+/g, ' ')
+      .trim();
 
-    // fallback if anchor text empty
+    // If still empty, try link text minus "View"
     if (!caseNoRaw) {
-      caseNoRaw = $(cells[1]).clone().find('script, style').remove().end().text()
+      caseNoRaw = $(cells[1]).text()
+        .replace(/\bView\b/gi, '')
         .replace(/\s+/g, ' ')
-        .replace(/^View\s*/i, '')
         .trim();
     }
 
@@ -358,7 +362,19 @@ function parseCauseListHTML(html) {
       if (cnrMatch) cnr = cnrMatch[1];
     }
 
-    const parties = $(cells[2]).text().replace(/\s+/g, ' ').trim();
+    const partiesHtml = $(cells[2]).html() || '';
+    const partiesClean = partiesHtml
+      .replace(/<br\s*\/?>/gi, '\n')        // br → newline
+      .replace(/<[^>]+>/g, '')              // strip all tags
+      .replace(/&nbsp;/g, ' ')
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean)
+      .join(' vs ')                         // join lines with " vs "
+      .replace(/\s*\bversus\b\s*/gi, ' vs ') // "versus" word → "vs"
+      .replace(/\bvs\s+vs\b/gi, 'vs')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
 
     // Advocate column — eCourts puts both pet + resp advocates here
     // Format: "PET_ADV_NAME RESP_ADV_NAME" or sometimes separated by newline/br
@@ -398,7 +414,7 @@ function parseCauseListHTML(html) {
       caseNoNum,
       cnr,
       courtCode,
-      parties,
+      parties: partiesClean,
       advocate,
       petAdvocate,
       respAdvocate,
