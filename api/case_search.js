@@ -348,8 +348,15 @@ function parseResults(html) {
     if (!srNo.match(/^\d+$/)) return;
     const caseNo    = $(cells[1]).text().trim().replace(/\s+/g, ' ');
     const partiesHtml = $(cells[2]).html() || '';
-    const parties   = partiesHtml.replace(/<br\s*\/?>/gi, ' vs ').replace(/<[^>]+>/g, '')
-      .replace(/\s+/g, ' ').replace(/\bvs\s+vs\b/gi, 'vs').trim();
+    const partiesText = partiesHtml
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\s*\bversus\b\s*/gi, '\n')
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean);
+    const parties = partiesText.join(' vs ').replace(/\s+vs\s+vs\s+/gi, ' vs ').replace(/\s{2,}/g, ' ').trim();
 
     // Advocate cell — split by <br> to separate pet adv and resp adv
     const advHtml = $(cells[3]).html() || '';
