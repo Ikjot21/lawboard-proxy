@@ -244,53 +244,50 @@ module.exports = async (req, res) => {
 
       const cases = parseCauseListHTML(html);
       console.log('Parsed cases:', cases.length);
-      if (cases.length > 0) console.log('[CASE0]', JSON.stringify(cases[0]));
-
-      // ── Background fetch nextDate for cases missing it (criminal) ──────────
-      // viewHistory returns detail including nextDate — run in parallel, 10s limit
-      const casesNeedingDate = cases.filter(c => !c.nextDate && c.caseNoNum && c.cnr);
-      if (casesNeedingDate.length > 0) {
-        console.log(`Fetching nextDate for ${casesNeedingDate.length} cases via viewHistory`);
-        const fetchNextDate = async (c) => {
-          try {
-            const p = new URLSearchParams({
-              court_code: c.courtCode || '1',
-              state_code: state_code || '',
-              dist_code: dist_code || '',
-              court_complex_code: complex_code || '',
-              case_no: c.caseNoNum,
-              cino: c.cnr,
-              hideparty: '',
-              search_flag: 'CScaseNumber',
-              search_by: 'CSAdvName',
-              ajax_req: 'true',
-              app_token: '',
-            });
-            const r = await axios.post(
-              `${BASE}/?p=home/viewHistory`,
-              p.toString(),
-              { headers: H, timeout: 8000 }
-            );
-            const raw = r.data;
-            const detailHtml = typeof raw === 'object' ? (raw.data_list || '') : raw;
-            if (!detailHtml) return;
-            // Extract next date from detail HTML
-            const dateMatch = detailHtml.match(/Next\s+Hearing\s+Date[^<]*<[^>]+>([^<]+)/i)
-              || detailHtml.match(/(\d{2}(?:st|nd|rd|th)\s+\w+\s+\d{4})/i)
-              || detailHtml.match(/(\d{2}-\d{2}-\d{4})/);
-            if (dateMatch) c.nextDate = dateMatch[1].trim();
-          } catch (_) {}
-        };
-        // Run in batches of 8 to avoid Vercel 20s timeout
-        const BATCH = 8;
-        for (let i = 0; i < casesNeedingDate.length; i += BATCH) {
-          const batch = casesNeedingDate.slice(i, i + BATCH);
-          await Promise.allSettled(batch.map(fetchNextDate));
-        }
-        console.log('nextDate fetched, sample:', casesNeedingDate[0]?.nextDate);
-      }
-
       return res.status(200).json({ success: true, cases, totalCases: cases.length });
+    }
+
+    // ── Step 6: Batch fetch nextDate for a batch of cases ──────────────────
+    if (action === 'nextdates') {
+      // Flutter sends: { action:'nextdates', cases:[{caseNoNum,cnr,courtCode},...], state_code, dist_code, complex_code }
+      const batchCases = req.body.cases || [];
+      if (!batchCases.length) return res.status(200).json({ success: true, dates: {} });
+
+      const results = {}; // cnr → nextDate
+
+      await Promise.allSettled(batchCases.map(async (c) => {
+        try {
+          const p = new URLSearchParams({
+            court_code:         c.courtCode || '1',
+            state_code:         state_code || '',
+            dist_code:          dist_code  || '',
+            court_complex_code: (complex_code || '').split('@')[0],
+            case_no:            c.caseNoNum || '',
+            cino:               c.cnr || '',
+            hideparty:          '',
+            search_flag:        'CScaseNumber',
+            search_by:          'CSAdvName',
+            ajax_req:           'true',
+            app_token:          '',
+          });
+          const r = await axios.post(
+            `${BASE}/?p=home/viewHistory`,
+            p.toString(),
+            { headers: H, timeout: 8000 }
+          );
+          const raw = r.data;
+          const detailHtml = typeof raw === 'object' ? (raw.data_list || '') : raw;
+          if (!detailHtml || detailHtml.length < 20) return;
+
+          // Extract next date — multiple patterns
+          const m = detailHtml.match(/Next\s+Hearing\s+Date[\s\S]{0,60}?(\d{2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})/i)
+            || detailHtml.match(/>(\d{2}(?:st|nd|rd|th)\s+\w+\s+\d{4})<\/strong>/i)
+            || detailHtml.match(/>(\d{2}-\d{2}-\d{4})<\/strong>/i);
+          if (m) results[c.cnr] = m[1].trim();
+        } catch (_) {}
+      }));
+
+      return res.status(200).json({ success: true, dates: results });
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });
