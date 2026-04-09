@@ -491,15 +491,21 @@ function parseCauseListHTML(html) {
     // 2. 5th column (criminal - separate column)
     // 3. Scan all remaining columns
     if (!nextDate) {
-      for (let ci = 3; ci < cells.length; ci++) {
-        const txt = $(cells[ci]).text().replace(/&nbsp;/g, ' ').trim();
-        const m = txt.match(/(\d{2}-\d{2}-\d{4})/);
-        if (m) { nextDate = m[1]; break; }
-      }
-    }
+          for (let ci = 3; ci < cells.length; ci++) {
+            const txt = $(cells[ci]).text().replace(/&nbsp;/g, ' ').trim();
+            const m = txt.match(/(\d{1,2}-\d{1,2}-\d{4})/) ||
+                      txt.match(/(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4})/i);
+            if (m) { nextDate = m[1]; break; }
+          }
+        }
 
-    console.log(`[${srNo}] caseNo="${caseNoRaw}" cells=${cells.length} nextDate="${nextDate}`);
+        // Also check cellText for "Nth Month YYYY" format (civil courts)
+        if (!nextDate) {
+          const m = cellText.match(/(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4})/i);
+          if (m) nextDate = m[1];
+        }
 
+        console.log(`[CL-ROW] sr=${srNo} cnr="${cnr}" caseNo="${caseNoRaw}" nextDate="${nextDate}" stage="${currentStage}"`);
     cases.push({
       srNo,
       caseNo: caseNoRaw,
