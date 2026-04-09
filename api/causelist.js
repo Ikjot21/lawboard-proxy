@@ -275,8 +275,12 @@ module.exports = async (req, res) => {
           const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
           // Next date
-          const mDate = text.match(/Next\s+(?:Hearing\s+)?Date\s*[:\-]?\s*(\d{2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})/i);
+const mDate = text.match(/Next\s+(?:Hearing\s+)?Date\s*[:\-]?\s*(\d{2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})/i);
           if (mDate) dates[c.cnr] = mDate[1].trim();
+
+          // DEBUG
+          console.log(`[ND] cnr=${c.cnr} htmlLen=${html.length} dateMatch=${mDate ? mDate[1] : 'NULL'}`);
+          console.log(`[ND] text-preview="${text.slice(0, 300)}"`);
 
           // Disposal / Nature of Disposal
           const mDisp = text.match(/Nature\s+of\s+Disposal\s+([A-Za-z\s\-]+?)(?=\s{2,}|\s*Court|\s*Stage|\s*$)/i);
