@@ -275,12 +275,21 @@ module.exports = async (req, res) => {
           const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
           // Next date
-const mDate = text.match(/Next\s+(?:Hearing\s+)?Date\s*[:\-]?\s*(\d{2}(?:st|nd|rd|th)?\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})/i);
-          if (mDate) dates[c.cnr] = mDate[1].trim();
+// Try multiple patterns — eCourts uses different formats
+          const mDate =
+            text.match(/Next\s+(?:Hearing\s+)?Date\s*[:\-]?\s*(\d{1,2}(?:st|nd|rd|th)?\s+\w+\s+\d{4})/i) ||
+            text.match(/Next\s+(?:Hearing\s+)?Date\s*[:\-]?\s*(\d{1,2}-\d{1,2}-\d{4})/i) ||
+            text.match(/Next\s+(?:Hearing\s+)?Date\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})/i);
 
-          // DEBUG
-          console.log(`[ND] cnr=${c.cnr} htmlLen=${html.length} dateMatch=${mDate ? mDate[1] : 'NULL'}`);
-          console.log(`[ND] text-preview="${text.slice(0, 300)}"`);
+          if (mDate) {
+            dates[c.cnr] = mDate[1].trim();
+            console.log(`[ND] ✓ ${c.cnr} → date="${mDate[1].trim()}"`);
+          } else {
+            // Log what we actually got — find any date-like string near "next"
+            const anyDate = text.match(/(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4})/i) ||
+                            text.match(/(\d{1,2}-\d{1,2}-\d{4})/);
+            console.log(`[ND] ✗ ${c.cnr} htmlLen=${html.length} anyDate=${anyDate ? anyDate[1] : 'NONE'} preview="${text.slice(0,200)}"`);
+          }
 
           // Disposal / Nature of Disposal
           const mDisp = text.match(/Nature\s+of\s+Disposal\s+([A-Za-z\s\-]+?)(?=\s{2,}|\s*Court|\s*Stage|\s*$)/i);
