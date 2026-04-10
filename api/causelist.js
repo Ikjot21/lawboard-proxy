@@ -10,29 +10,6 @@ const H = {
   'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
 };
 
-// ── Retry helper — waits before retrying on 403/5xx ──────────────────────
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-async function postWithRetry(url, params, options = {}, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const resp = await axios.post(url, params, { headers: H, timeout: 12000, ...options });
-      return resp;
-    } catch (e) {
-      const status = e.response?.status;
-      const isRetryable = status === 403 || status === 429 || status >= 500;
-      console.log(`postWithRetry attempt ${i+1} failed: ${status || e.message}`);
-      if (isRetryable && i < retries - 1) {
-        const delay = (i + 1) * 1200; // 1.2s, 2.4s
-        console.log(`Waiting ${delay}ms before retry...`);
-        await sleep(delay);
-        continue;
-      }
-      throw e;
-    }
-  }
-}
-
 module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
@@ -84,25 +61,17 @@ module.exports = async (req, res) => {
     // ── Step 2: Get Districts ───────────────────────────
     if (action === 'districts') {
       let districts = [];
-      const endpoints = [
-        'cause_list/getDistrictName',
-        'casestatus/fillDistrict',
-        'casestatus/getDistrictName',
-      ];
-      for (const endpoint of endpoints) {
+      // Try multiple endpoints
+      for (const endpoint of ['cause_list/getDistrictName', 'casestatus/fillDistrict', 'casestatus/getDistrictName']) {
         try {
           const params = new URLSearchParams({ state_code, ajax_req: 'true', app_token: '' });
-          // postWithRetry: retries 3x with 1.2s, 2.4s backoff on 403/5xx
-          const resp = await postWithRetry(`${BASE}/?p=${endpoint}`, params.toString());
+          const resp = await axios.post(`${BASE}/?p=${endpoint}`, params.toString(), {
+            headers: H, timeout: 10000,
+          });
           console.log(`${endpoint} response:`, typeof resp.data, JSON.stringify(resp.data).slice(0,200));
           const parsed = parseSelectOptions(resp.data);
           if (parsed.length > 0) { districts = parsed; break; }
         } catch(e) { console.log(`${endpoint} failed:`, e.message); }
-      }
-      // All live endpoints failed → hardcoded fallback so UI never gets stuck
-      if (districts.length === 0) {
-        const hd = HARDCODED_DISTRICTS[String(state_code)];
-        if (hd) { districts = hd; console.log('Using hardcoded districts for state', state_code); }
       }
       return res.status(200).json({ success: true, districts });
     }
@@ -111,7 +80,8 @@ module.exports = async (req, res) => {
     if (action === 'complexes') {
       const appToken = req.body.app_token || '';
       const params = new URLSearchParams({ state_code, dist_code, ajax_req: 'true', app_token: appToken });
-      const resp = await postWithRetry(`${BASE}/?p=casestatus/fillcomplex`, params.toString());
+      const resp = await axios.post(`${BASE}/?p=casestatus/fillcomplex`, params.toString(),
+        { headers: H, timeout: 12000 });
       const complexes = parseSelectOptions(resp.data);
       return res.status(200).json({ success: true, complexes });
     }
@@ -159,7 +129,8 @@ module.exports = async (req, res) => {
         ajax_req: 'true',
         app_token: '',
       });
-      await postWithRetry(`${BASE}/?p=casestatus/set_data`, params.toString());
+      await axios.post(`${BASE}/?p=casestatus/set_data`, params.toString(),
+        { headers: H, timeout: 12000 });
       // Get cause list courts
       const params2 = new URLSearchParams({
         state_code, dist_code,
@@ -169,7 +140,8 @@ module.exports = async (req, res) => {
         ajax_req: 'true',
         app_token: '',
       });
-      const resp2 = await postWithRetry(`${BASE}/?p=cause_list/fillCauseList`, params2.toString());
+      const resp2 = await axios.post(`${BASE}/?p=cause_list/fillCauseList`, params2.toString(),
+        { headers: H, timeout: 12000 });
       console.log('Courts raw:', JSON.stringify(resp2.data).slice(0, 300));
       const courts = parseCourts(resp2.data);
       return res.status(200).json({ success: true, courts });
@@ -538,81 +510,3 @@ function parseCauseListHTML(html) {
 
   return cases;
 }
-// ── Hardcoded Districts fallback — used when eCourts returns 403 ─────────
-// state_code → district list  (codes from eCourts network inspection)
-const HARDCODED_DISTRICTS = {
-  // Punjab (29)
-  '29': [
-    {code:'1',name:'Amritsar'},{code:'2',name:'Barnala'},{code:'3',name:'Bathinda'},
-    {code:'4',name:'Faridkot'},{code:'5',name:'Fatehgarh Sahib'},{code:'6',name:'Fazilka'},
-    {code:'7',name:'Ferozepur'},{code:'8',name:'Gurdaspur'},{code:'9',name:'Hoshiarpur'},
-    {code:'10',name:'Jalandhar'},{code:'11',name:'Kapurthala'},{code:'12',name:'Ludhiana'},
-    {code:'13',name:'Mansa'},{code:'14',name:'Moga'},{code:'15',name:'Mohali (SAS Nagar)'},
-    {code:'16',name:'Muktsar'},{code:'17',name:'Pathankot'},{code:'18',name:'Patiala'},
-    {code:'19',name:'Rupnagar'},{code:'20',name:'Sangrur'},{code:'21',name:'Shahid Bhagat Singh Nagar'},
-    {code:'22',name:'Tarn Taran'},
-  ],
-  // Haryana (13)
-  '13': [
-    {code:'3',name:'Ambala'},{code:'4',name:'Bhiwani'},{code:'88',name:'Charkhi Dadri'},
-    {code:'5',name:'Faridabad'},{code:'6',name:'Fatehabad'},{code:'7',name:'Gurugram'},
-    {code:'8',name:'Hisar'},{code:'9',name:'Jhajjar'},{code:'10',name:'Jind'},
-    {code:'11',name:'Kaithal'},{code:'12',name:'Karnal'},{code:'13',name:'Kurukshetra'},
-    {code:'14',name:'Mahendragarh'},{code:'15',name:'Nuh'},{code:'16',name:'Palwal'},
-    {code:'17',name:'Panchkula'},{code:'18',name:'Panipat'},{code:'19',name:'Rewari'},
-    {code:'20',name:'Rohtak'},{code:'21',name:'Sirsa'},{code:'22',name:'Sonipat'},
-    {code:'23',name:'Yamunanagar'},
-  ],
-  // Delhi (10)
-  '10': [
-    {code:'1',name:'Central'},{code:'2',name:'East'},{code:'3',name:'New Delhi'},
-    {code:'4',name:'North'},{code:'5',name:'North East'},{code:'6',name:'North West'},
-    {code:'7',name:'Shahdara'},{code:'8',name:'South'},{code:'9',name:'South East'},
-    {code:'10',name:'South West'},{code:'11',name:'West'},
-  ],
-  // Chandigarh (6)
-  '6': [{code:'1',name:'Chandigarh'}],
-  // Uttar Pradesh (35)
-  '35': [
-    {code:'1',name:'Agra'},{code:'2',name:'Aligarh'},{code:'3',name:'Allahabad'},
-    {code:'4',name:'Ambedkar Nagar'},{code:'5',name:'Amethi'},{code:'6',name:'Amroha'},
-    {code:'7',name:'Auraiya'},{code:'8',name:'Azamgarh'},{code:'9',name:'Baghpat'},
-    {code:'10',name:'Bahraich'},{code:'11',name:'Ballia'},{code:'12',name:'Balrampur'},
-    {code:'13',name:'Banda'},{code:'14',name:'Barabanki'},{code:'15',name:'Bareilly'},
-    {code:'16',name:'Basti'},{code:'17',name:'Bhadohi'},{code:'18',name:'Bijnor'},
-    {code:'19',name:'Budaun'},{code:'20',name:'Bulandshahr'},{code:'21',name:'Chandauli'},
-    {code:'22',name:'Chitrakoot'},{code:'23',name:'Deoria'},{code:'24',name:'Etah'},
-    {code:'25',name:'Etawah'},{code:'26',name:'Farrukhabad'},{code:'27',name:'Fatehpur'},
-    {code:'28',name:'Firozabad'},{code:'29',name:'Gautam Buddha Nagar'},{code:'30',name:'Ghaziabad'},
-    {code:'31',name:'Ghazipur'},{code:'32',name:'Gonda'},{code:'33',name:'Gorakhpur'},
-    {code:'34',name:'Hamirpur'},{code:'35',name:'Hapur'},{code:'36',name:'Hardoi'},
-    {code:'37',name:'Hathras'},{code:'38',name:'Jalaun'},{code:'39',name:'Jaunpur'},
-    {code:'40',name:'Jhansi'},{code:'41',name:'Kannauj'},{code:'42',name:'Kanpur Dehat'},
-    {code:'43',name:'Kanpur Nagar'},{code:'44',name:'Kasganj'},{code:'45',name:'Kaushambi'},
-    {code:'46',name:'Kheri'},{code:'47',name:'Kushinagar'},{code:'48',name:'Lalitpur'},
-    {code:'49',name:'Lucknow'},{code:'50',name:'Maharajganj'},{code:'51',name:'Mahoba'},
-    {code:'52',name:'Mainpuri'},{code:'53',name:'Mathura'},{code:'54',name:'Mau'},
-    {code:'55',name:'Meerut'},{code:'56',name:'Mirzapur'},{code:'57',name:'Moradabad'},
-    {code:'58',name:'Muzaffarnagar'},{code:'59',name:'Pilibhit'},{code:'60',name:'Pratapgarh'},
-    {code:'61',name:'Prayagraj'},{code:'62',name:'Raebareli'},{code:'63',name:'Rampur'},
-    {code:'64',name:'Saharanpur'},{code:'65',name:'Sambhal'},{code:'66',name:'Sant Kabir Nagar'},
-    {code:'67',name:'Shahjahanpur'},{code:'68',name:'Shamli'},{code:'69',name:'Shravasti'},
-    {code:'70',name:'Siddharthnagar'},{code:'71',name:'Sitapur'},{code:'72',name:'Sonbhadra'},
-    {code:'73',name:'Sultanpur'},{code:'74',name:'Unnao'},{code:'75',name:'Varanasi'},
-  ],
-  // Maharashtra (22)
-  '22': [
-    {code:'1',name:'Ahmednagar'},{code:'2',name:'Akola'},{code:'3',name:'Amravati'},
-    {code:'4',name:'Aurangabad'},{code:'5',name:'Beed'},{code:'6',name:'Bhandara'},
-    {code:'7',name:'Buldhana'},{code:'8',name:'Chandrapur'},{code:'9',name:'Dhule'},
-    {code:'10',name:'Gadchiroli'},{code:'11',name:'Gondia'},{code:'12',name:'Hingoli'},
-    {code:'13',name:'Jalgaon'},{code:'14',name:'Jalna'},{code:'15',name:'Kolhapur'},
-    {code:'16',name:'Latur'},{code:'17',name:'Mumbai City'},{code:'18',name:'Mumbai Suburban'},
-    {code:'19',name:'Nagpur'},{code:'20',name:'Nanded'},{code:'21',name:'Nandurbar'},
-    {code:'22',name:'Nashik'},{code:'23',name:'Osmanabad'},{code:'24',name:'Palghar'},
-    {code:'25',name:'Parbhani'},{code:'26',name:'Pune'},{code:'27',name:'Raigad'},
-    {code:'28',name:'Ratnagiri'},{code:'29',name:'Sangli'},{code:'30',name:'Satara'},
-    {code:'31',name:'Sindhudurg'},{code:'32',name:'Solapur'},{code:'33',name:'Thane'},
-    {code:'34',name:'Wardha'},{code:'35',name:'Washim'},{code:'36',name:'Yavatmal'},
-  ],
-};
