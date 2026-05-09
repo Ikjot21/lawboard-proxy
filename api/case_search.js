@@ -122,17 +122,8 @@ console.log(
   }
 
   // ── viewHistory — NO CAPTCHA ───────────────────────────────────────────────
-if (action === 'viewHistory') {
-  const internalToken = req.headers['x-internal-token'] || req.body?.token || '';
-
-  if (internalToken !== process.env.INTERNAL_TOKEN) {
-    return res.status(403).json({
-      success: false,
-      error: 'Disabled: direct no-CAPTCHA case detail refresh is not allowed.',
-    });
-  }
-
-      try {
+  if (action === 'viewHistory') {
+    try {
       // Always get a fresh session cookie — display_pdf needs same session
       const freshCookie = await getFreshCookie();
       const activeCookie = freshCookie || cookieStr || '';
