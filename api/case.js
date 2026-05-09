@@ -7,7 +7,64 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  const { cnr, captchaCode, cookieStr } = req.body || {};
+  const { cnr, captchaCode, cookieStr, action, normal_v, case_val, court_code, filename, appFlag } = req.body || {};
+
+  // ── display_pdf: proxy PDF download using saved cookieStr ────────────────
+  if (action === 'display_pdf') {
+    if (!normal_v || !case_val) {
+      return res.status(400).json({ success: false, error: 'normal_v and case_val required' });
+    }
+    try {
+      console.log('[case.js display_pdf] normal_v:', normal_v, '| filename:', filename?.substring(0,30));
+      const pdfParams = new URLSearchParams({
+        normal_v:   normal_v   || '',
+        case_val:   case_val   || '',
+        court_code: court_code || '',
+        filename:   filename   || '',
+        appFlag:    appFlag    || '',
+        ajax_req:   'true',
+        app_token:  '',
+      });
+      const pdfResp = await axios.post(
+        `${ECOURTS_BASE}/?p=home/display_pdf`,
+        pdfParams.toString(),
+        {
+          headers: {
+            'User-Agent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+            'Content-Type':     'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Referer':          `${ECOURTS_BASE}/`,
+            'Origin':            ECOURTS_BASE,
+            'Cookie':            cookieStr || '',
+          },
+          timeout: 15000,
+        }
+      );
+      const pdfRaw = pdfResp.data;
+      console.log('[case.js display_pdf] status:', pdfResp.status);
+      console.log('[case.js display_pdf] raw:', JSON.stringify(pdfRaw).substring(0, 300));
+      const orderPath = typeof pdfRaw === 'object' ? pdfRaw.order : null;
+      if (!orderPath) {
+        console.log('[case.js display_pdf] NO ORDER PATH — full raw:', JSON.stringify(pdfRaw));
+        return res.status(200).json({ success: false, error: `PDF path not found: ${JSON.stringify(pdfRaw).substring(0,100)}` });
+      }
+      const fileUrl = `${ECOURTS_BASE}/${orderPath.replace(/^\//, '')}`;
+      const fileResp = await axios.get(fileUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+          'Cookie': cookieStr || '',
+        },
+        responseType: 'arraybuffer',
+        timeout: 20000,
+      });
+      const pdfBase64 = Buffer.from(fileResp.data).toString('base64');
+      return res.status(200).json({ success: true, pdfBase64, pdfUrl: fileUrl });
+    } catch (err) {
+      console.error('[case.js display_pdf] error:', err.message);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
   if (!cnr || !captchaCode) {
     return res.status(400).json({ success: false, error: 'cnr and captchaCode required' });
   }
@@ -52,7 +109,7 @@ module.exports = async (req, res) => {
     console.log('history:', result.hearingHistory.length);
     console.log('orders:', result.orders.length);
 
-    return res.status(200).json({ success: true, case: result });
+    return res.status(200).json({ success: true, case: result, cookieStr: cookieStr || '' });
 
   } catch (err) {
     console.error('Error:', err.message);
@@ -166,24 +223,49 @@ function parseHTML(html, cnr) {
   });
   result.hearingHistory = [...new Set(history)];
 
-  // ── Interim Orders ──
-  const orders = [];
+  // ── Interim Orders — with displayPdf onclick params ──
+  const parseOrderTable = (tbl) => {
+    const rows = [];
+    $(tbl).find('tr').each((_, row) => {
+      const cells  = $(row).find('td');
+      if (cells.length < 2) return;
+      const num    = $(cells[0]).text().trim().replace(/&nbsp;/g, '').trim();
+      const date   = $(cells[1]).text().trim().replace(/&nbsp;/g, '').trim();
+      const details = cells.length >= 3 ? $(cells[2]).text().trim() : '';
+      const onClick = $(row).find('a').attr('onclick') || '';
+      const m = onClick.match(/displayPdf\('([^']+)','([^']+)','([^']+)','([^']+)','([^']*)'\)/);
+      if (num.match(/^\d+$/) && date.match(/\d{2}-\d{2}-\d{4}/)) {
+        rows.push({
+          orderNo: num, num, date, details,
+          ...(m ? { normal_v: m[1], case_val: m[2], court_code: m[3], filename: m[4], appFlag: m[5] } : {}),
+        });
+      }
+    });
+    return rows;
+  };
+
+  const orderTables = [];
   $('table').each((_, tbl) => {
-    const tblTxt = $(tbl).text().toLowerCase();
-    if (tblTxt.includes('order number') || tblTxt.includes('copy of order')) {
-      $(tbl).find('tr').each((_, row) => {
-        const cells = $(row).find('td');
-        if (cells.length >= 2) {
-          const num  = $(cells[0]).text().trim();
-          const date = $(cells[1]).text().trim();
-          if (num.match(/^\d+$/) && date.match(/\d{2}-\d{2}-\d{4}/)) {
-            orders.push({ num, date });
-          }
-        }
-      });
+    const txt = $(tbl).text().toLowerCase();
+    if (txt.includes('order number') || txt.includes('copy of order') || txt.includes('copy of final order')) {
+      orderTables.push(tbl);
     }
   });
-  result.orders = orders;
+
+  let interimOrders = [], finalOrders = [];
+  if (orderTables.length === 1) {
+    const txt = $(orderTables[0]).text().toLowerCase();
+    if (txt.includes('final')) finalOrders   = parseOrderTable(orderTables[0]);
+    else                       interimOrders = parseOrderTable(orderTables[0]);
+  } else if (orderTables.length >= 2) {
+    interimOrders = parseOrderTable(orderTables[0]);
+    finalOrders   = parseOrderTable(orderTables[orderTables.length - 1]);
+  }
+
+  result.interimOrders = interimOrders;
+  result.finalOrders   = finalOrders;
+  result.orders        = [...interimOrders, ...finalOrders];
+  console.log('[case.js] orders:', result.orders.length, '| has normal_v:', !!result.orders[0]?.normal_v);
 
   // ── Acts ──
   const acts = [];

@@ -149,102 +149,165 @@ module.exports = async (req, res) => {
 
     // ── Cause List CAPTCHA ──────────────────────────────
     if (action === 'captcha') {
-      try {
-        const { wrapper } = require('axios-cookiejar-support');
-        const { CookieJar } = require('tough-cookie');
-        const jar = new CookieJar();
-        const client = wrapper(axios.create({ jar }));
+          try {
+            const { wrapper } = require('axios-cookiejar-support');
+            const { CookieJar } = require('tough-cookie');
+            const jar = new CookieJar();
+            const client = wrapper(axios.create({ jar }));
 
-        // Step 1: Load cause_list page — sets session cookies in jar
-        const pageResp = await client.get(`${BASE}/?p=cause_list/index&app_token=`, {
-          headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
-          timeout: 12000,
-        });
-        console.log('CauseList page status:', pageResp.status, '| len:', pageResp.data.length);
+            // Step 1: cause_list/index — session ਸ਼ੁਰੂ
+            const pageResp = await client.get(`${BASE}/?p=cause_list/index&app_token=`, {
+              headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/` },
+              timeout: 12000,
+            });
+            console.log('CauseList page status:', pageResp.status, '| len:', pageResp.data.length);
 
-        // Extract captcha token from page HTML
-        const tokenMatch = pageResp.data.match(/securimage_show\.php\?([a-f0-9]+)/);
-        const captchaToken = tokenMatch ? tokenMatch[1] : '';
-        console.log('CauseList captcha token:', captchaToken || 'NOT FOUND');
+            // Step 2: set_data — ਇਹ ਜ਼ਰੂਰੀ ਹੈ, browser ਵੀ ਇਹੀ ਕਰਦਾ ਹੈ submit ਤੋਂ ਪਹਿਲਾਂ
+            const { state_code: sc, dist_code: dc, complex_code: cc, est_code: ec } = req.body;
+            if (sc && dc && cc) {
+              const estCodeSend = (ec && ec.includes(',')) ? ec : (ec || 'null');
+              const setDataParams = new URLSearchParams({
+                complex_code:          `${cc}@${estCodeSend}@N`,
+                selected_state_code:   sc,
+                selected_dist_code:    dc,
+                selected_est_code:     'null',
+                ajax_req:              'true',
+                app_token:             '',
+              });
+              await client.post(`${BASE}/?p=casestatus/set_data`, setDataParams.toString(), {
+                headers: { ...H, 'Referer': `${BASE}/?p=cause_list/index` },
+                timeout: 10000,
+              });
+              console.log('CauseList set_data done | state:', sc, '| dist:', dc, '| complex:', cc);
+            }
 
-        // Step 2: Get CAPTCHA image with SAME jar (same session)
-        const imgUrl = captchaToken
-          ? `${BASE}/vendor/securimage/securimage_show.php?${captchaToken}`
-          : `${BASE}/vendor/securimage/securimage_show.php`;
-        const imgResp = await client.get(imgUrl, {
-          headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/?p=cause_list/index` },
-          responseType: 'arraybuffer', timeout: 10000,
-        });
+            // Step 3: CAPTCHA token ਕੱਢੋ page ਤੋਂ
+            const tokenMatch = pageResp.data.match(/securimage_show\.php\?([a-f0-9]+)/);
+            const captchaToken = tokenMatch ? tokenMatch[1] : '';
+            console.log('CauseList captcha token:', captchaToken || 'NOT FOUND');
 
-        // Get all cookies from jar
-        const cookies = await jar.getCookies(BASE);
-        const cookieStr = cookies.map(c => `${c.key}=${c.value}`).join('; ');
-        console.log('CauseList jar cookies:', cookieStr.slice(0, 80));
+            // Step 4: CAPTCHA image — ਉਹੀ jar
+            const imgUrl = captchaToken
+              ? `${BASE}/vendor/securimage/securimage_show.php?${captchaToken}`
+              : `${BASE}/vendor/securimage/securimage_show.php`;
+            const imgResp = await client.get(imgUrl, {
+              headers: { 'User-Agent': H['User-Agent'], 'Referer': `${BASE}/?p=cause_list/index` },
+              responseType: 'arraybuffer', timeout: 10000,
+            });
 
-        const contentType = imgResp.headers['content-type'] || 'image/png';
-        const captchaBase64 = `data:${contentType};base64,${Buffer.from(imgResp.data).toString('base64')}`;
-        console.log('CauseList captcha imgLen:', captchaBase64.length);
-        return res.status(200).json({ success: true, captchaBase64, cookieStr, captchaToken });
-      } catch(e) {
-        console.log('CauseList captcha error:', e.message);
-        return res.status(500).json({ success: false, error: e.message });
-      }
-    }
+            // Step 5: ਸਾਰੀਆਂ cookies ਕੱਢੋ
+            const jarData = jar.toJSON();
+            const allCookies = jarData.cookies || [];
+            const cookieStr = allCookies.map(c => `${c.key}=${c.value}`).join('; ');
+            console.log('CauseList jar ALL cookies:', cookieStr.slice(0, 150));
 
-    // ── Step 5: Submit & Get Cause List (okhttp bypasses CAPTCHA) ──
+            const contentType = imgResp.headers['content-type'] || 'image/png';
+            const captchaBase64 = `data:${contentType};base64,${Buffer.from(imgResp.data).toString('base64')}`;
+            console.log('CauseList captcha imgLen:', captchaBase64.length);
+            return res.status(200).json({ success: true, captchaBase64, cookieStr, captchaToken });
+          } catch(e) {
+            console.log('CauseList captcha error:', e.message);
+            return res.status(500).json({ success: false, error: e.message });
+          }
+        }
+
+    // ── list_with_captcha: User-facing — proper captcha ─────────────────────
+    // Flutter sends: captchaCode (user typed) + cookieStr + captchaToken
+    // (both from /api/causelist?action=captcha response)
+   if (action === 'list_with_captcha') {
+         const captchaCode  = req.body.captchaCode  || '';
+         const captchaCookie = req.body.cookieStr   || '';
+         const captchaToken = req.body.captchaToken || '';
+
+         if (!captchaCode)   return res.status(400).json({ success: false, error: 'captchaCode required' });
+         if (!captchaCookie) return res.status(400).json({ success: false, error: 'cookieStr required' });
+
+         try {
+           console.log('[list_with_captcha] cookie:', captchaCookie.slice(0, 80), '| token:', captchaToken);
+
+           const courtNameTxt = req.body.court_name_txt || '';
+           const estCodeRaw   = est_code || '';
+           const estCodeSend  = (estCodeRaw.includes(',') || !estCodeRaw) ? 'null' : estCodeRaw;
+
+           const params = new URLSearchParams({
+             CL_court_no:             court_no       || '',
+             causelist_date:          causelist_date  || '',
+             cause_list_captcha_code: captchaCode.trim(),
+             court_name_txt:          courtNameTxt,
+             state_code:              state_code      || '',
+             dist_code:               dist_code       || '',
+             court_complex_code:      complex_code    || '',
+             est_code:                estCodeSend,
+             cicri:                   req.body.cicri  || 'cri',
+             selprevdays:             '0',
+             ajax_req:                'true',
+             app_token:               '',
+           });
+
+           console.log('[list_with_captcha] submitting | court:', court_no, '| date:', causelist_date, '| captcha:', captchaCode, '| est:', estCodeSend, '| courtName:', courtNameTxt.substring(0, 30));
+
+           const resp = await axios.post(
+             `${BASE}/?p=cause_list/submitCauseList`,
+             params.toString(),
+             {
+               headers: {
+                 ...H,
+                 'Referer': `${BASE}/?p=cause_list/index`,
+                 'Cookie':  captchaCookie,
+               },
+               timeout: 20000,
+             }
+           );
+
+           const rawResp = resp.data;
+           console.log('[list_with_captcha] resp HTTP:', resp.status);
+           console.log('[list_with_captcha] resp type:', typeof rawResp);
+           if (typeof rawResp === 'object') {
+             console.log('[list_with_captcha] resp keys:', Object.keys(rawResp));
+             console.log('[list_with_captcha] resp.status:', rawResp.status);
+             console.log('[list_with_captcha] resp.errormsg:', rawResp.errormsg);
+             if (rawResp.case_data)    console.log('[list_with_captcha] case_data len:', rawResp.case_data.length);
+             if (rawResp.div_captcha)  console.log('[list_with_captcha] div_captcha present (new captcha in response)');
+           } else {
+             console.log('[list_with_captcha] resp string len:', rawResp?.length);
+             console.log('[list_with_captcha] resp preview:', String(rawResp).substring(0, 200));
+           }
+
+           if (typeof rawResp === 'object' && rawResp.errormsg &&
+               rawResp.errormsg.toLowerCase().includes('captcha')) {
+             console.log('[list_with_captcha] ❌ CAPTCHA REJECTED by eCourts');
+             return res.status(200).json({ success: false, error: 'Incorrect CAPTCHA — please try again' });
+           }
+
+           const html = typeof rawResp === 'object'
+             ? (rawResp.case_data || rawResp.cause_list_html || rawResp.html || '')
+             : rawResp;
+
+           console.log('[list_with_captcha] html len:', html?.length);
+
+           if (!html || html.length < 10) {
+             console.log('[list_with_captcha] ❌ no HTML — full resp:', JSON.stringify(rawResp).substring(0, 300));
+             return res.status(200).json({ success: false, error: `No cases found. Server: ${JSON.stringify(rawResp).substring(0, 100)}` });
+           }
+
+           const cases = parseCauseListHTML(html);
+           console.log('[list_with_captcha] ✅ success! cases:', cases.length);
+           return res.status(200).json({ success: true, cases, totalCases: cases.length });
+
+         } catch (err) {
+           console.error('[list_with_captcha] error:', err.message);
+           return res.status(500).json({ success: false, error: err.message });
+         }
+       }
+
+    // ── list: INTERNAL ONLY — BGSync background date updates ─────────────────
+    // WARNING: captcha bypass — DO NOT expose in user-facing UI
+    // Used only by background sync to update next hearing dates in diary
     if (action === 'list') {
-      const params = new URLSearchParams({
-        CL_court_no:             court_no,
-        causelist_date:          causelist_date,
-        cause_list_captcha_code: '',          // empty — okhttp bypasses CAPTCHA
-        court_name_txt:          '',
-        state_code,
-        dist_code,
-        court_complex_code:      complex_code,
-        est_code:                est_code || 'null',
-        cicri:                   req.body.cicri || 'cri',
-        selprevdays:             '0',
-        ajax_req:                'true',
-        app_token:               '',
+      return res.status(403).json({
+        success: false,
+        error: 'No-captcha cause list route disabled. Use list_with_captcha only.',
       });
-      const resp = await axios.post(`${BASE}/?p=cause_list/submitCauseList`, params.toString(), {
-        headers: { ...H, 'Cookie': cookieStr || '',
-          'Referer': `${BASE}/?p=cause_list/index` },
-        timeout: 20000,
-      });
-      const rawResp = resp.data;
-      console.log('Submit raw keys:', typeof rawResp === 'object' ? Object.keys(rawResp) : 'string');
-
-      // Check for invalid captcha
-      if (typeof rawResp === 'object' && rawResp.errormsg && rawResp.errormsg.toLowerCase().includes('invalid captcha')) {
-        // Extract new captcha token from response
-        const newToken = (rawResp.div_captcha || '').match(/securimage_show\.php\?([a-f0-9]+)/)?.[1] || '';
-        return res.status(200).json({ success: false, error: 'CAPTCHA galat hai — dobara try karo', newCaptchaToken: newToken });
-      }
-
-      // Get HTML from case_data or cause_list_html
-      const html = (typeof rawResp === 'object')
-        ? (rawResp.case_data || rawResp.cause_list_html || rawResp.html || JSON.stringify(rawResp))
-        : rawResp;
-
-      console.log('Submit html len:', html.length, '| preview:', html.slice(0, 150));
-
-      // Log first few rows to understand structure
-      const $dbg = cheerio.load(html);
-      let rowCount = 0;
-      $dbg('table tr').each((_, row) => {
-        if (rowCount++ > 8) return false;
-        const cells = $dbg(row).find('td');
-        if (cells.length < 2) return;
-        console.log(`[ROW] cells=${cells.length}`);
-        cells.each((ci, cell) => {
-          console.log(`  [${ci}]: "${$dbg(cell).text().replace(/\s+/g,' ').trim().slice(0,100)}"`);
-        });
-      });
-
-      const cases = parseCauseListHTML(html);
-      console.log('Parsed cases:', cases.length);
-      return res.status(200).json({ success: true, cases, totalCases: cases.length });
     }
 
     // ── Step 6: Batch fetch nextDate for a batch of cases ──────────────────
@@ -451,7 +514,13 @@ function parseCauseListHTML(html) {
       .split('\n')
       .map(l => l.trim())
       .filter(Boolean);
-    const partiesClean = partiesText.join(' vs ').replace(/\s+vs\s+vs\s+/gi, ' vs ').replace(/\s{2,}/g, ' ').trim();
+    const partiesClean = (() => {
+      if (partiesText.length === 0) return '';
+      if (partiesText.length === 1) return partiesText[0];
+      const petitioner = partiesText[0];
+      const respondents = partiesText.slice(1).join(', ');
+      return `${petitioner} vs ${respondents}`;
+    })().replace(/\s{2,}/g, ' ').trim();
 
     // Advocate column (index 3)
     const advRaw = cells.length >= 4 ? $(cells[3]).html() || '' : '';

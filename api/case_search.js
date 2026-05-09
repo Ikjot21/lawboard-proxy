@@ -1,7 +1,24 @@
 const axios   = require('axios');
 const cheerio = require('cheerio');
+const { wrapper } = require('axios-cookiejar-support');
+const { CookieJar } = require('tough-cookie');
 
 const BASE = 'https://services.ecourts.gov.in/ecourtindia_v6';
+
+// Get a fresh eCourts session cookie (hits captcha page)
+async function getFreshCookie() {
+  const jar    = new CookieJar();
+  const client = wrapper(axios.create({ jar }));
+  await client.get(`${BASE}/?p=casestatus/index&app_token=`, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+      'Referer': `${BASE}/`,
+    },
+    timeout: 12000,
+  });
+  const cookies = await jar.getCookies(BASE);
+  return cookies.map(c => `${c.key}=${c.value}`).join('; ');
+}
 const H = {
   'User-Agent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
   'X-Requested-With': 'XMLHttpRequest',
@@ -29,6 +46,17 @@ module.exports = async (req, res) => {
   // ── display_pdf — fetch PDF bytes via proxy (session required) ─────────────
   if (action === 'display_pdf') {
     try {
+console.log('=== DISPLAY PDF START ===');
+console.log('normal_v:', normal_v);
+console.log('case_val:', case_val);
+console.log('court_code:', court_code);
+console.log('filename:', filename);
+console.log('appFlag:', appFlag);
+console.log('cookieStr length:', (cookieStr || '').length);
+console.log(
+  'cookieStr preview:',
+  (cookieStr || '').substring(0, 120)
+);
       // Step 1: Get PDF path
       const params = new URLSearchParams({
         normal_v:   normal_v   || '',
@@ -39,12 +67,45 @@ module.exports = async (req, res) => {
         ajax_req:   'true',
         app_token:  '',
       });
-      const resp = await axios.post(`${BASE}/?p=home/display_pdf`, params.toString(),
-        { headers: { ...H, 'Cookie': cookieStr || '' }, timeout: 15000 });
+      const resp = await axios.post(
+        `${BASE}/?p=home/display_pdf`,
+        params.toString(),
+        { headers: { ...H, 'Cookie': cookieStr || '' }, timeout: 15000 }
+      );
+
       const raw = resp.data;
+      console.log('=== DISPLAY PDF RESPONSE ===');
+      console.log('raw type:', typeof raw);
+      console.log('raw:', raw);
+
       const orderPath = typeof raw === 'object' ? raw.order : null;
-      if (!orderPath)
-        return res.status(200).json({ success: false, error: 'PDF path not found' });
+      console.log('orderPath:', orderPath);
+
+      if (!orderPath) {
+        console.log('=== PDF PATH NOT FOUND ===');
+        console.log('Sent params =>', {
+          normal_v,
+          case_val,
+          court_code,
+          filename,
+          appFlag,
+          cookieLen: (cookieStr || '').length,
+        });
+
+        return res.status(200).json({
+          success: false,
+          error: 'PDF path not found',
+          debug: {
+            normal_v,
+            case_val,
+            court_code,
+            filename,
+            appFlag,
+            cookieLen: (cookieStr || '').length,
+            raw,
+          },
+        });
+      }
 
       // Step 2: Fetch PDF bytes with same session cookie
       const pdfUrl = `${BASE}/${orderPath.replace(/^\//, '')}`;
@@ -61,8 +122,22 @@ module.exports = async (req, res) => {
   }
 
   // ── viewHistory — NO CAPTCHA ───────────────────────────────────────────────
-  if (action === 'viewHistory') {
-    try {
+if (action === 'viewHistory') {
+  const internalToken = req.headers['x-internal-token'] || req.body?.token || '';
+
+  if (internalToken !== process.env.INTERNAL_TOKEN) {
+    return res.status(403).json({
+      success: false,
+      error: 'Disabled: direct no-CAPTCHA case detail refresh is not allowed.',
+    });
+  }
+
+      try {
+      // Always get a fresh session cookie — display_pdf needs same session
+      const freshCookie = await getFreshCookie();
+      const activeCookie = freshCookie || cookieStr || '';
+      console.log('[viewHistory] fresh cookie:', activeCookie.substring(0, 60));
+
       const params = new URLSearchParams({
         court_code:         court_code || '1',
         state_code:         state_code || '',
@@ -77,13 +152,14 @@ module.exports = async (req, res) => {
         app_token:          '',
       });
       const resp = await axios.post(`${BASE}/?p=home/viewHistory`, params.toString(),
-        { headers: { ...H, 'Cookie': cookieStr || '' }, timeout: 15000 });
+        { headers: { ...H, 'Cookie': activeCookie }, timeout: 15000 });
       const raw  = resp.data;
       const html = typeof raw === 'object' ? (raw.data_list || '') : raw;
       if (!html || html.length < 20)
         return res.status(200).json({ success: false, error: 'Case detail not found' });
       const detail = parseDetailHTML(html, cino);
-      return res.status(200).json({ success: true, detail });
+      // Return cookieStr so Flutter can use same session for display_pdf
+      return res.status(200).json({ success: true, detail, cookieStr: activeCookie });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
@@ -515,43 +591,48 @@ function parseDetailHTML(html, cnr) {
   ];
 
   function parsePartyLi(li) {
-    const raw = $(li).html() || '';
-    const lines = raw
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .split('\n').map(l => l.trim()).filter(Boolean);
-    let name = '', adv = '';
-    for (const line of lines) {
-      if (/^\d+\)/.test(line)) {
-        name = line.replace(/^\d+\)\s*/, '').replace(/\s*Advocate[-:\s].*/i, '').trim();
+      const raw = $(li).html() || '';
+      const lines = raw
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .split('\n').map(l => l.trim()).filter(Boolean);
+
+      // Collect ALL numbered names — one <li> may have multiple accused
+      const names = [], advs = [];
+      for (const line of lines) {
+        if (/^\d+\)/.test(line)) {
+          const n = line.replace(/^\d+\)\s*/, '').replace(/\s*Advocate[-:\s].*/i, '').trim();
+          if (n) names.push(n);
+        }
+        if (/Advocate[-:\s]/i.test(line)) {
+          const a = line.replace(/.*Advocate[-:\s]+/i, '').trim();
+          if (a) advs.push(a);
+        }
       }
-      if (/Advocate[-:\s]/i.test(line)) {
-        adv = line.replace(/.*Advocate[-:\s]+/i, '').trim();
-      }
+      // Return first name+adv for backward compat, but expose all
+      return { name: names[0] || '', adv: advs[0] || '', allNames: names, allAdvs: advs };
     }
-    return { name, adv };
-  }
 
   const pets = [], petAdvs = [];
   const petSel = petSels.find(s => $(s).length > 0) || '';
   if (petSel) {
-    $(petSel).each((_, li) => {
-      const { name, adv } = parsePartyLi(li);
-      if (name) pets.push(name);
-      if (adv)  petAdvs.push(adv);
-    });
-  }
+      $(petSel).each((_, li) => {
+        const { allNames, allAdvs } = parsePartyLi(li);
+        allNames.forEach(n => { if (n) pets.push(n); });
+        allAdvs.forEach(a => { if (a) petAdvs.push(a); });
+      });
+    }
 
   const resps = [], respAdvs = [];
   const respSel = respSels.find(s => $(s).length > 0) || '';
   if (respSel) {
-    $(respSel).each((_, li) => {
-      const { name, adv } = parsePartyLi(li);
-      if (name) resps.push(name);
-      if (adv)  respAdvs.push(adv);
-    });
-  }
+      $(respSel).each((_, li) => {
+        const { allNames, allAdvs } = parsePartyLi(li);
+        allNames.forEach(n => { if (n) resps.push(n); });
+        allAdvs.forEach(a => { if (a) respAdvs.push(a); });
+      });
+    }
 
   // ── Fallback: scan by heading text (newer eCourts layout) ─────────────────
   if (pets.length === 0) {
