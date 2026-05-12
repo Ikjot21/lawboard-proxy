@@ -300,62 +300,12 @@ module.exports = async (req, res) => {
          }
        }
 
-    // ── list: INTERNAL ONLY — BGSync background date updates ─────────────────
-    // WARNING: captcha bypass — DO NOT expose in user-facing UI
-    // Used only by background sync to update next hearing dates in diary
+
     if (action === 'list') {
-      const params = new URLSearchParams({
-        CL_court_no:             court_no,
-        causelist_date:          causelist_date,
-        cause_list_captcha_code: '',          // empty — okhttp bypasses CAPTCHA
-        court_name_txt:          '',
-        state_code,
-        dist_code,
-        court_complex_code:      complex_code,
-        est_code:                est_code || 'null',
-        cicri:                   req.body.cicri || 'cri',
-        selprevdays:             '0',
-        ajax_req:                'true',
-        app_token:               '',
+      return res.status(403).json({
+        success: false,
+        error: 'Cause list requires user-entered CAPTCHA. Use list_with_captcha.',
       });
-      const resp = await axios.post(`${BASE}/?p=cause_list/submitCauseList`, params.toString(), {
-        headers: { ...H, 'Cookie': cookieStr || '',
-          'Referer': `${BASE}/?p=cause_list/index` },
-        timeout: 20000,
-      });
-      const rawResp = resp.data;
-      console.log('Submit raw keys:', typeof rawResp === 'object' ? Object.keys(rawResp) : 'string');
-
-      // Check for invalid captcha
-      if (typeof rawResp === 'object' && rawResp.errormsg && rawResp.errormsg.toLowerCase().includes('invalid captcha')) {
-        // Extract new captcha token from response
-        const newToken = (rawResp.div_captcha || '').match(/securimage_show\.php\?([a-f0-9]+)/)?.[1] || '';
-        return res.status(200).json({ success: false, error: 'CAPTCHA galat hai — dobara try karo', newCaptchaToken: newToken });
-      }
-
-      // Get HTML from case_data or cause_list_html
-      const html = (typeof rawResp === 'object')
-        ? (rawResp.case_data || rawResp.cause_list_html || rawResp.html || JSON.stringify(rawResp))
-        : rawResp;
-
-      console.log('Submit html len:', html.length, '| preview:', html.slice(0, 150));
-
-      // Log first few rows to understand structure
-      const $dbg = cheerio.load(html);
-      let rowCount = 0;
-      $dbg('table tr').each((_, row) => {
-        if (rowCount++ > 8) return false;
-        const cells = $dbg(row).find('td');
-        if (cells.length < 2) return;
-        console.log(`[ROW] cells=${cells.length}`);
-        cells.each((ci, cell) => {
-          console.log(`  [${ci}]: "${$dbg(cell).text().replace(/\s+/g,' ').trim().slice(0,100)}"`);
-        });
-      });
-
-      const cases = parseCauseListHTML(html);
-      console.log('Parsed cases:', cases.length);
-      return res.status(200).json({ success: true, cases, totalCases: cases.length });
     }
 
     // ── Step 6: Batch fetch nextDate for a batch of cases ──────────────────
